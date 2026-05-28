@@ -1397,7 +1397,7 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   // deferred export will not run into this problem.
   int dmabuf_fd;
   uint64_t dmabufOffset;
-  
+
   auto err = hsaKmtExportDMABufHandle(ptr, len, &dmabuf_fd, &dmabufOffset);
   assert(dmabufOffset/pageSize == fragOffset && "DMA Buf inconsistent with pointer offset.");
   if (err != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
@@ -3717,7 +3717,7 @@ hsa_status_t Runtime::VMemoryAddressReserve(void** va, size_t size, uint64_t add
   }
 
   reserved_address_map_[addr] = AddressHandle(addr, size, true);
-  *va = addr; 
+  *va = addr;
   return HSA_STATUS_SUCCESS;
 }
 
@@ -3936,7 +3936,7 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
         *targetAgent, &driver_handle, ShareType::DMABUF_FD,
         &memHandle->driver_handle.dmabuf_fd);
   }
-  if (status != HSA_STATUS_SUCCESS) 
+  if (status != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(status, "Failed to import memory");
 }
 
