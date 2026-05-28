@@ -161,8 +161,13 @@
   X(TileGetArbitrary,          116)  \
   X(ReduceOnStream,            117)  \
   X(HostCtxCreate,             118)  \
-  X(TeamSplit2D,               119)
-
+  X(TeamSplit2D,               119)  \
+  X(TileBroadcast,             120)  \
+  X(TileBroadcastWave,         121)  \
+  X(TileBroadcastWG,           122)  \
+  X(TileAllgather,             123)  \
+  X(TileAllgatherWave,         124)  \
+  X(TileAllgatherWG,           125)
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {
   ROCSHMEM_FOREACH_TEST_TYPE(_ROCSHMEM_ENUM_ENTRY)
