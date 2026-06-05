@@ -144,6 +144,7 @@ struct config : output_config
     bool   attach_output_generation_sync = get_env("ROCPROF_ATTACH_OUTPUT_GENERATION_SYNC", false);
     bool   pc_sampling_host_trap         = false;
     bool   pc_sampling_stochastic        = false;
+    bool   pc_sampling_correction        = get_env("ROCPROF_PC_SAMPLING_CORRECTION", true);
     size_t pc_sampling_interval          = get_env("ROCPROF_PC_SAMPLING_INTERVAL", 1);
     rocprofiler_pc_sampling_method_t pc_sampling_method_value = ROCPROFILER_PC_SAMPLING_METHOD_NONE;
     rocprofiler_pc_sampling_unit_t   pc_sampling_unit_value   = ROCPROFILER_PC_SAMPLING_UNIT_NONE;
@@ -306,6 +307,7 @@ config::save(ArchiveT& ar) const
 
     CFG_SERIALIZE_MEMBER(pc_sampling_host_trap);
     CFG_SERIALIZE_MEMBER(pc_sampling_stochastic);
+    CFG_SERIALIZE_MEMBER(pc_sampling_correction);
     CFG_SERIALIZE_MEMBER(pc_sampling_method);
     CFG_SERIALIZE_MEMBER(pc_sampling_unit);
     CFG_SERIALIZE_MEMBER(pc_sampling_interval);
