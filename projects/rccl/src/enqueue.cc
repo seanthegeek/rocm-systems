@@ -122,6 +122,26 @@ ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* ma
           result, ignore1);
       ignore1:;
       }
+#ifdef GENERATE_SYM_KERNELS
+      if (sym == 1) {
+        // [RCCL] Match upstream NCCL ncclInitKernelsForDevice(): symmetric
+        // kernels get the maximum dynamic LDS the device/function allows, and
+        // that size is recorded in ncclSymkKernelMaxDynamicSmem[] so the device
+        // (args->maxDynamicSmem) and the launch (plan->kernelDynSmem) agree on
+        // the per-chunk accumulator size (maxChunkElts = maxDynamicSmem/sizeof(AccT)).
+        // The RCCL 2.29.7 port dropped both this table write and the matching
+        // launch-time use of plan->kernelDynSmem (see ncclLaunchKernelInner),
+        // leaving the table 0 -> maxChunkElts == 0 -> runaway chunk loop and an
+        // illegal memory access.
+        int dynSmem = maxSharedMem - attr.sharedSizeBytes;
+        if (dynSmem < 0) dynSmem = 0;
+        CUDACHECKGOTO(cudaFuncSetAttribute(fn,
+          cudaFuncAttributeMaxDynamicSharedMemorySize, dynSmem),
+          result, next_kernel);
+        ncclSymkKernelMaxDynamicSmem[k] = dynSmem;
+        goto next_kernel;
+      }
+#endif
       if (ncclMaxSharedMem != 0) {
         int sharedMemSize = ncclMaxSharedMem;
         if (sharedMemSize > (maxSharedMem-attr.sharedSizeBytes)) {
@@ -2020,7 +2040,13 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
 #endif
   dim3 grid = {(unsigned)nChannels, 1, 1};
   dim3 block = {(unsigned)plan->threadPerBlock, 1, 1};
-  int smem = rcclShmemDynamicSize(comm->cudaArch, comm->WarpSize);
+  // [RCCL] Symmetric collectives are launched with their own per-kernel dynamic
+  // LDS (plan->kernelDynSmem, populated from ncclSymkKernelMaxDynamicSmem[]),
+  // matching upstream NCCL. Non-symmetric kernels use the fixed RCCL scratch
+  // size. The 2.29.7 port previously hardcoded rcclShmemDynamicSize() here,
+  // which disagreed with what the symmetric device kernels expect.
+  int smem = plan->isSymColl ? plan->kernelDynSmem
+                             : rcclShmemDynamicSize(comm->cudaArch, comm->WarpSize);
   cudaStream_t launchStream = planner->streams->stream;
 
   NCCLCHECK(ncclProfilerStartKernelLaunchEvent(plan, launchStream));
