@@ -124,15 +124,8 @@ ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* ma
       }
 #ifdef GENERATE_SYM_KERNELS
       if (sym == 1) {
-        // [RCCL] Match upstream NCCL ncclInitKernelsForDevice(): symmetric
-        // kernels get the maximum dynamic LDS the device/function allows, and
-        // that size is recorded in ncclSymkKernelMaxDynamicSmem[] so the device
-        // (args->maxDynamicSmem) and the launch (plan->kernelDynSmem) agree on
-        // the per-chunk accumulator size (maxChunkElts = maxDynamicSmem/sizeof(AccT)).
-        // The RCCL 2.29.7 port dropped both this table write and the matching
-        // launch-time use of plan->kernelDynSmem (see ncclLaunchKernelInner),
-        // leaving the table 0 -> maxChunkElts == 0 -> runaway chunk loop and an
-        // illegal memory access.
+        // Symmetric kernels get max dynamic LDS, recorded in ncclSymkKernelMaxDynamicSmem[]
+        // so device (args->maxDynamicSmem) and launch (plan->kernelDynSmem) agree; matches upstream.
         int dynSmem = maxSharedMem - attr.sharedSizeBytes;
         if (dynSmem < 0) dynSmem = 0;
         CUDACHECKGOTO(cudaFuncSetAttribute(fn,
@@ -2040,11 +2033,8 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
 #endif
   dim3 grid = {(unsigned)nChannels, 1, 1};
   dim3 block = {(unsigned)plan->threadPerBlock, 1, 1};
-  // [RCCL] Symmetric collectives are launched with their own per-kernel dynamic
-  // LDS (plan->kernelDynSmem, populated from ncclSymkKernelMaxDynamicSmem[]),
-  // matching upstream NCCL. Non-symmetric kernels use the fixed RCCL scratch
-  // size. The 2.29.7 port previously hardcoded rcclShmemDynamicSize() here,
-  // which disagreed with what the symmetric device kernels expect.
+  // Symmetric collectives use their own per-kernel dynamic LDS (plan->kernelDynSmem);
+  // non-symmetric kernels use the fixed RCCL scratch size.
   int smem = plan->isSymColl ? plan->kernelDynSmem
                              : rcclShmemDynamicSize(comm->cudaArch, comm->WarpSize);
   cudaStream_t launchStream = planner->streams->stream;

@@ -11,10 +11,7 @@
 #include "reduce_kernel.h"
 #include "common.h"
 
-// HIP/ROCm does not provide CUDA's __isShared() address-space query, which the
-// symmetric kernels use only as a __builtin_assume() hint. Map it to the AMDGCN
-// builtin so these hints still compile. Guarded so we never clash with a HIP
-// runtime that already declares __isShared().
+// HIP has no __isShared() (used only as a __builtin_assume hint); map it to the AMDGCN builtin.
 #if defined(__HIP_PLATFORM_AMD__) && !defined(NCCL_SYMK_HAVE_ISSHARED)
 #define NCCL_SYMK_HAVE_ISSHARED 1
 static __device__ __forceinline__ bool __isShared(const void* p) {

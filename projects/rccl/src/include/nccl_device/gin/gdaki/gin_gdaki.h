@@ -81,14 +81,8 @@ NCCL_DEVICE_INLINE static void putImpl(ncclGinCtx ctx, Coop coop, int peer, bool
       counter_laddr.key = loadConst(&gdaki->sink_buffer_lkey);
     }
 
-    // [RCCL] hip_compat.h orders thread_scope thread(0) < block(1) < device(2)
-    // < system(3): system is the WIDEST/LARGEST value (upstream NVIDIA libcu++
-    // uses the opposite ordering where system is the smallest). The original
-    // `given > required` guard meant "given is narrower than the required system
-    // scope"; with the reversed hip_compat ordering that must be `given < required`,
-    // otherwise the system release fence is never emitted and the source buffer is
-    // not flushed to system scope before the NIC reads it.
-    if ((required == cuda::thread_scope_system) && (given < required)) {
+    // cuda::thread_scope_system has the lowest value
+    if ((required == cuda::thread_scope_system) && (given > required)) {
       doca_gpu_dev_verbs_fence_release<DOCA_GPUNETIO_VERBS_SYNC_SCOPE_SYS>();
     }
 
@@ -156,14 +150,8 @@ NCCL_DEVICE_INLINE static void putValueImpl(ncclGinCtx ctx, Coop coop, int peer,
       sig_laddr.key = loadConst(&gdaki->sink_buffer_lkey);
     }
 
-    // [RCCL] hip_compat.h orders thread_scope thread(0) < block(1) < device(2)
-    // < system(3): system is the WIDEST/LARGEST value (upstream NVIDIA libcu++
-    // uses the opposite ordering where system is the smallest). The original
-    // `given > required` guard meant "given is narrower than the required system
-    // scope"; with the reversed hip_compat ordering that must be `given < required`,
-    // otherwise the system release fence is never emitted and the source buffer is
-    // not flushed to system scope before the NIC reads it.
-    if ((required == cuda::thread_scope_system) && (given < required)) {
+    // cuda::thread_scope_system has the lowest value
+    if ((required == cuda::thread_scope_system) && (given > required)) {
       doca_gpu_dev_verbs_fence_release<DOCA_GPUNETIO_VERBS_SYNC_SCOPE_SYS>();
     }
 
