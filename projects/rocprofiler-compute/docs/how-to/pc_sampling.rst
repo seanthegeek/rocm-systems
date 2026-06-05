@@ -36,6 +36,8 @@ For using profiling options for PC sampling the configuration needed are:
 
    $ rocprof-compute profile -n pc_test --no-roof --experimental --pc-sampling --pc-sampling-method stochastic --pc-sampling-interval 1048576 -VVV -- target_app
 
+PC sampling profiling now emits only ``ps_file_results.json`` in the workload directory; the per-sample, kernel-trace, and agent-info ``ps_file_*.csv`` artifacts are no longer produced.
+
 Analysis options
 ================
 For using analysis options for PC sampling the configuration needed are:
@@ -62,7 +64,7 @@ Selecting single kernel stochastic PC sampling:
    :align: left
    :alt: Stochastic PC sampling snapshot
 
-If you don't filter by kernel, the output will fall back to the original data from ``rocprofiler-sdk`` csv output for all the kernels:
+If you don't filter by kernel, the output shows the aggregated data from ``rocprofiler-sdk`` for all the kernels:
 
 .. image:: ../data/pc_sampling/pc_sampling_no_kernel_filtering.png
    :align: left

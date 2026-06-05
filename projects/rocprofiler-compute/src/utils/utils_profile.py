@@ -422,7 +422,7 @@ def pc_sampling_prof(
             # no counter collection for pc sampling
             "ROCPROF_COUNTER_COLLECTION": "0",
             "ROCPROF_KERNEL_TRACE": "1",
-            "ROCPROF_OUTPUT_FORMAT": "csv,json",
+            "ROCPROF_OUTPUT_FORMAT": "json",
             "ROCPROF_OUTPUT_PATH": workload_dir,
             "ROCPROF_OUTPUT_FILE_NAME": "ps_file",
             "ROCPROFILER_PC_SAMPLING_BETA_ENABLED": "1",
@@ -464,7 +464,6 @@ def pc_sampling_prof(
             "--pc-sampling-unit",
             unit,
             "--output-format",
-            "csv",
             "json",
             "--pc-sampling-interval",
             str(interval),

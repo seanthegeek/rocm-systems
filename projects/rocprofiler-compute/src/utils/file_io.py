@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import json
 import re
 from collections import OrderedDict
 from pathlib import Path
@@ -23,6 +24,9 @@ from utils.utils_common import canonical_config_arch, normalize_filter_to_str_li
 
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd
+
+# rocprofiler-sdk agent record "type" enum value for a GPU agent.
+ROCPROFILER_AGENT_TYPE_GPU = 2
 
 
 def load_panel_configs(
@@ -203,28 +207,22 @@ def create_df_kernel_top_stats(
     return grouped.reset_index(drop=True), dispatch_info.reset_index(drop=True)
 
 
-def build_agent_to_gpu_map(
-    agent_info_path: Path,
-) -> dict[str, int]:
+def build_agent_to_gpu_map_from_json(
+    agents: list[dict[str, Any]],
+) -> dict[int, int]:
     """
-    Map ``"Agent N"`` strings to 0-indexed GPU IDs.
+    Map agent ``id.handle`` values to 0-indexed GPU IDs.
 
-    GPU agents are identified by ``Agent_Type == "GPU"`` in the
-    agent info CSV.  They are sorted by ``Node_Id`` so that the
-    first GPU agent maps to GPU 0, the second to GPU 1, etc.
-
-    Returns an empty dict when *agent_info_path* does not exist.
+    GPU agents are identified by ``type == ROCPROFILER_AGENT_TYPE_GPU``
+    in the ``agents`` array of ``ps_file_results.json``.  They are
+    sorted by ``node_id`` so that the first GPU agent maps to GPU 0,
+    the second to GPU 1, etc.
     """
-    if not agent_info_path.exists():
-        return {}
-
-    agent_df = pd.read_csv(agent_info_path)
-    gpu_agents = (
-        agent_df[agent_df["Agent_Type"] == "GPU"]
-        .sort_values("Node_Id")
-        .reset_index(drop=True)
+    gpu_agents = sorted(
+        (agent for agent in agents if agent.get("type") == ROCPROFILER_AGENT_TYPE_GPU),
+        key=lambda agent: agent["node_id"],
     )
-    return {f"Agent {row.Node_Id}": row.Index for row in gpu_agents.itertuples()}
+    return {agent["id"]["handle"]: index for index, agent in enumerate(gpu_agents)}
 
 
 @demarcate
@@ -232,40 +230,53 @@ def process_pc_sampling_kernel_trace(
     workload_path: str,
 ) -> pd.DataFrame:
     """
-    Build kernel and dispatch info from a kernel trace.
+    Build kernel and dispatch info from the kernel dispatch records.
 
     Used for PC-sampling-only runs where ``pmc_perf`` data is not
-    available.  Reads ``ps_file_kernel_trace.csv`` (and optionally
-    ``ps_file_agent_info.csv`` for GPU ID mapping)
+    available.  Reads ``ps_file_results.json``: kernel dispatch buffer
+    records for timestamps and dispatch info, ``kernel_symbols`` for
+    kernel names, and ``agents`` for the GPU ID mapping.
     """
-    trace_path = Path(workload_path) / "ps_file_kernel_trace.csv"
-    if not trace_path.exists():
+    columns = [
+        "Dispatch_Id",
+        "Kernel_Name",
+        "Start_Timestamp",
+        "End_Timestamp",
+        "GPU_ID",
+    ]
+    json_path = Path(workload_path) / "ps_file_results.json"
+    if not json_path.exists():
         console_warning(
-            f"Kernel trace not found at {trace_path}. Cannot build dispatch data."
+            f"PC sampling results not found at {json_path}. Cannot build dispatch data."
         )
-        return pd.DataFrame(
-            columns=[
-                "Dispatch_Id",
-                "Kernel_Name",
-                "Start_Timestamp",
-                "End_Timestamp",
-                "GPU_ID",
-            ]
-        )
+        return pd.DataFrame(columns=columns)
 
-    trace_df = pd.read_csv(trace_path)
+    tool_data = json.loads(json_path.read_text(encoding="utf-8"))[
+        "rocprofiler-sdk-tool"
+    ][0]
+    dispatches = tool_data["buffer_records"]["kernel_dispatch"]
+    kernel_id_to_name = {
+        symbol["kernel_id"]: symbol["formatted_kernel_name"]
+        for symbol in tool_data["kernel_symbols"]
+    }
+    agent_to_gpu = build_agent_to_gpu_map_from_json(tool_data["agents"])
 
-    # Map agent IDs to GPU IDs
-    agent_to_gpu = build_agent_to_gpu_map(
-        Path(workload_path) / "ps_file_agent_info.csv"
-    )
-    trace_df["GPU_ID"] = trace_df["Agent_Id"].map(agent_to_gpu).fillna(0).astype(int)
-
-    trace_df = trace_df[
-        ["Dispatch_Id", "Kernel_Name", "Start_Timestamp", "End_Timestamp", "GPU_ID"]
+    rows = [
+        {
+            "Dispatch_Id": dispatch["dispatch_info"]["dispatch_id"],
+            "Kernel_Name": kernel_id_to_name.get(
+                dispatch["dispatch_info"]["kernel_id"]
+            ),
+            "Start_Timestamp": dispatch["start_timestamp"],
+            "End_Timestamp": dispatch["end_timestamp"],
+            "GPU_ID": agent_to_gpu.get(
+                dispatch["dispatch_info"]["agent_id"]["handle"], 0
+            ),
+        }
+        for dispatch in dispatches
     ]
 
-    return trace_df
+    return pd.DataFrame(rows, columns=columns)
 
 
 @demarcate

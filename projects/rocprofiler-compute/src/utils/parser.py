@@ -10,7 +10,7 @@ from typing import Any, Optional, Union
 import pandas as pd
 
 from utils import schema
-from utils.logger import console_debug, console_error, console_warning, demarcate
+from utils.logger import console_error, console_warning, demarcate
 from utils.metrics.evaluation_pipeline import eval_metric
 from utils.metrics.expression import gen_counter_list
 from utils.pattern_matching import fnmatch_glob_matches
@@ -558,7 +558,6 @@ def search_pc_sampling_record(
 def load_pc_sampling_data_per_kernel(
     method: str,
     file_name: Path,
-    csv_file_name: Path,
     kernel_name: str,
     sorting_type: str,
 ) -> pd.DataFrame:
@@ -579,18 +578,21 @@ def load_pc_sampling_data_per_kernel(
     :return: The counted and reordering pc sampling info.
     :rtype: pd.DataFrame:
     """
-    # Load kernel trace CSV with kernel info
-    kernel_trace_df = pd.read_csv(
-        csv_file_name, usecols=["Dispatch_Id", "Kernel_Id", "Kernel_Name"]
-    )
-    console_debug(
-        f"PC sampling: loaded kernel trace with {len(kernel_trace_df)} entries"
-    )
+    # Map dispatch_id -> kernel_id (kernel dispatch records) and
+    # kernel_id -> kernel name (kernel symbols) from the json.
+    kernel_dispatch = search_key_in_json(file_name, "kernel_dispatch")
+    kernel_symbols = search_key_in_json(file_name, "kernel_symbols")
+    kernel_id_to_name = {
+        symbol["kernel_id"]: symbol["formatted_kernel_name"]
+        for symbol in kernel_symbols
+    }
+    dispatch_to_kernel_id = {
+        dispatch["dispatch_info"]["dispatch_id"]: dispatch["dispatch_info"]["kernel_id"]
+        for dispatch in kernel_dispatch
+    }
 
-    # Filter kernels matching requested kernel_name
-    matching_kernels = kernel_trace_df[kernel_trace_df["Kernel_Name"] == kernel_name]
-    if matching_kernels.empty:
-        console_warning(f"PC sampling: cannot find kernel '{kernel_name}' in CSV")
+    if kernel_name not in kernel_id_to_name.values():
+        console_warning(f"PC sampling: cannot find kernel '{kernel_name}'")
         return pd.DataFrame()
 
     # Extract raw PC sampling records from JSON
@@ -639,14 +641,9 @@ def load_pc_sampling_data_per_kernel(
         console_warning("PC sampling: no records found after flattening dispatch IDs.")
         return df
 
-    # Map dispatch_id to kernel info (Kernel_Id and Kernel_Name)
-    dispatch_to_kernel = kernel_trace_df.set_index("Dispatch_Id")[
-        ["Kernel_Id", "Kernel_Name"]
-    ]
-
-    # Map dispatch_id to kernel info (Kernel_Id and Kernel_Name)
-    df["kernel_id"] = df["dispatch_id"].map(dispatch_to_kernel["Kernel_Id"])
-    df["kernel_name"] = df["dispatch_id"].map(dispatch_to_kernel["Kernel_Name"])
+    # Map dispatch_id to kernel info (kernel_id and kernel_name)
+    df["kernel_id"] = df["dispatch_id"].map(dispatch_to_kernel_id)
+    df["kernel_name"] = df["kernel_id"].map(kernel_id_to_name)
 
     # Drop dispatch_id
     df.drop(columns=["dispatch_id"], inplace=True)
@@ -760,77 +757,16 @@ def load_pc_sampling_data(
     if not file_prefix or file_prefix.lower() == "none":
         return pd.DataFrame()
 
-    pc_sampling_method = None
-
-    # NB:
-    #  - The default file name is subject to changes from rocprofv3
-    #  - Prioritize stochastic
-    #  - Alternatively, we could check pc_sampling_method in json
-    stochastic_path = Path(dir_path) / f"{file_prefix}_pc_sampling_stochastic.csv"
-    host_trap_path = Path(dir_path) / f"{file_prefix}_pc_sampling_host_trap.csv"
     json_file_path = Path(dir_path) / f"{file_prefix}_results.json"
-    csv_kernel_trace_file_path = Path(dir_path) / f"{file_prefix}_kernel_trace.csv"
-
-    if not csv_kernel_trace_file_path.exists():
-        console_warning(f"PC sampling: can not read {csv_kernel_trace_file_path}")
+    if not json_file_path.exists():
+        console_warning(f"PC sampling: can not read {json_file_path}")
         return pd.DataFrame()
 
-    if stochastic_path.exists():
-        pc_sampling_method = "stochastic"
-        csv_file_path = stochastic_path
-    elif host_trap_path.exists():
-        pc_sampling_method = "host_trap"
-        csv_file_path = host_trap_path
-    else:
-        console_warning(
-            f"PC sampling: can not detect pc sampling method for {file_prefix}"
-        )
-        return pd.DataFrame()
-
-    # No kernel filter, return grouped and sorted csv dir_pathectly
+    # No kernel filter: aggregate samples across all kernels by source line.
     if not workload.filter_kernel_ids:
-        # Load instruction CSV
-        df = pd.read_csv(csv_file_path)
+        return _load_pc_sampling_no_filter_data(json_file_path)
 
-        # Load kernel trace CSV
-        kernel_trace_df = pd.read_csv(csv_kernel_trace_file_path)
-
-        # Merge on Correlation_Id (instruction CSV) and Dispatch_Id (kernel trace CSV)
-        merged_df = df.merge(
-            kernel_trace_df[["Dispatch_Id", "Kernel_Name", "Kernel_Id"]],
-            how="left",
-            left_on="Correlation_Id",
-            right_on="Dispatch_Id",
-        )
-
-        # Group by Instruction_Comment and aggregate
-        grouped_counts = (
-            merged_df
-            .groupby("Instruction_Comment")
-            .agg(
-                count=("Instruction_Comment", "count"),
-                instruction=("Instruction", "first"),
-                Kernel_Id=("Kernel_Id", "first"),
-                Kernel_Name=("Kernel_Name", "first"),
-            )
-            .reset_index()
-            .rename(columns={"Instruction_Comment": "source_line"})
-        )
-        grouped_counts = grouped_counts[
-            [
-                "source_line",
-                "Kernel_Name",
-                "instruction",
-                "count",
-            ]
-        ]
-        grouped_counts["source_line"] = grouped_counts["source_line"].apply(
-            lambda x: f".../{Path(x).name}" if isinstance(x, str) and x else x
-        )
-
-        return grouped_counts.sort_values(by="count", ascending=False)
-
-    elif len(workload.filter_kernel_ids) > 1:
+    if len(workload.filter_kernel_ids) > 1:
         console_error(
             "PC sampling supports single kernel only! Please specify -k with "
             "single kernel.",
@@ -838,33 +774,106 @@ def load_pc_sampling_data(
         )
         return pd.DataFrame()
 
-    elif len(workload.filter_kernel_ids) == 1:
-        if not json_file_path.exists():
-            console_warning(f"PC sampling: can not read {json_file_path}")
-            return pd.DataFrame()
-        else:
-            kernel_top_df = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
-            kernel_index = workload.filter_kernel_ids[0]
-
-            if kernel_index >= len(kernel_top_df):
-                console_warning(
-                    f"Kernel index {kernel_index} is out of bounds. "
-                    f"kernel_top table has only {len(kernel_top_df)} rows."
-                )
-                return pd.DataFrame()
-
-            kernel_name = kernel_top_df.iloc[kernel_index]["Kernel_Name"]
-
-            return load_pc_sampling_data_per_kernel(
-                pc_sampling_method,
-                json_file_path,
-                csv_kernel_trace_file_path,
-                kernel_name,
-                sorting_type,
-            )
-    else:
-        console_warning("PC sampling: No data")
+    # Exactly one kernel filter.
+    kernel_top_df = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
+    kernel_index = workload.filter_kernel_ids[0]
+    if kernel_index >= len(kernel_top_df):
+        console_warning(
+            f"Kernel index {kernel_index} is out of bounds. "
+            f"kernel_top table has only {len(kernel_top_df)} rows."
+        )
         return pd.DataFrame()
+
+    pc_sampling_method = _detect_pc_sampling_method(json_file_path)
+    if pc_sampling_method is None:
+        console_warning(
+            f"PC sampling: can not detect pc sampling method for {file_prefix}"
+        )
+        return pd.DataFrame()
+
+    kernel_name = kernel_top_df.iloc[kernel_index]["Kernel_Name"]
+    return load_pc_sampling_data_per_kernel(
+        pc_sampling_method,
+        json_file_path,
+        kernel_name,
+        sorting_type,
+    )
+
+
+def _detect_pc_sampling_method(json_file_path: Path) -> Optional[str]:
+    """Detect the PC sampling method from the populated buffer record array.
+
+    Prioritizes stochastic over host_trap. Returns None when neither
+    array holds any samples.
+    """
+    buffer_records = json.loads(json_file_path.read_text(encoding="utf-8"))[
+        "rocprofiler-sdk-tool"
+    ][0]["buffer_records"]
+    if buffer_records["pc_sample_stochastic"]:
+        return "stochastic"
+    if buffer_records["pc_sample_host_trap"]:
+        return "host_trap"
+    return None
+
+
+def _load_pc_sampling_no_filter_data(json_file_path: Path) -> pd.DataFrame:
+    """Aggregate all-kernel PC samples by source line from the results json.
+
+    Kernel name is resolved per code object (last symbol wins for a shared
+    code object), mirroring the db-mode aggregation in calc_pc_sampling_data.
+    """
+    tool_data = json.loads(json_file_path.read_text(encoding="utf-8"))[
+        "rocprofiler-sdk-tool"
+    ][0]
+    buffer_records = tool_data["buffer_records"]
+    samples = (
+        buffer_records["pc_sample_stochastic"] + buffer_records["pc_sample_host_trap"]
+    )
+    instructions = tool_data["strings"]["pc_sample_instructions"]
+    comments = tool_data["strings"]["pc_sample_comments"]
+    kernel_name_by_code_object = {
+        symbol["code_object_id"]: symbol["formatted_kernel_name"]
+        for symbol in tool_data["kernel_symbols"]
+    }
+
+    rows = [
+        {
+            "source_line": (
+                comments[sample["inst_index"]]
+                if sample["inst_index"] < len(comments)
+                else None
+            ),
+            "instruction": (
+                instructions[sample["inst_index"]]
+                if sample["inst_index"] < len(instructions)
+                else None
+            ),
+            "Kernel_Name": kernel_name_by_code_object.get(
+                sample["record"]["pc"]["code_object_id"]
+            ),
+        }
+        for sample in samples
+    ]
+
+    df = pd.DataFrame(rows, columns=["source_line", "instruction", "Kernel_Name"])
+    grouped_counts = (
+        df
+        .groupby("source_line")
+        .agg(
+            count=("source_line", "count"),
+            instruction=("instruction", "first"),
+            Kernel_Name=("Kernel_Name", "first"),
+        )
+        .reset_index()
+    )
+    grouped_counts = grouped_counts[
+        ["source_line", "Kernel_Name", "instruction", "count"]
+    ]
+    grouped_counts["source_line"] = grouped_counts["source_line"].apply(
+        lambda x: f".../{Path(x).name}" if isinstance(x, str) and x else x
+    )
+
+    return grouped_counts.sort_values(by="count", ascending=False)
 
 
 def nullify_unevaluated_metric_values(

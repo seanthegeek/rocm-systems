@@ -13,7 +13,7 @@ import pytest
 from rocprof_compute_analyze.analysis_db import db_analysis
 from utils import schema
 from utils.file_io import (
-    build_agent_to_gpu_map,
+    build_agent_to_gpu_map_from_json,
     process_pc_sampling_kernel_trace,
 )
 from utils.parser import (
@@ -58,6 +58,43 @@ def _make_record(
     }
 
 
+def _make_dispatch(
+    dispatch_id: int,
+    kernel_id: int,
+    agent_handle: int = 1,
+    start: int = 0,
+    end: int = 0,
+) -> dict:
+    """A kernel_dispatch buffer record mapping a dispatch to a kernel."""
+    return {
+        "start_timestamp": start,
+        "end_timestamp": end,
+        "dispatch_info": {
+            "dispatch_id": dispatch_id,
+            "kernel_id": kernel_id,
+            "agent_id": {"handle": agent_handle},
+        },
+    }
+
+
+def _make_kernel_symbol(
+    kernel_id: int,
+    code_object_id: int,
+    formatted_kernel_name: str,
+) -> dict:
+    """A kernel_symbols entry mapping kernel/code-object ids to a name."""
+    return {
+        "kernel_id": kernel_id,
+        "code_object_id": code_object_id,
+        "formatted_kernel_name": formatted_kernel_name,
+    }
+
+
+def _make_agent(handle: int, node_id: int, agent_type: int) -> dict:
+    """An agents entry (type 1 == CPU, type 2 == GPU)."""
+    return {"id": {"handle": handle}, "type": agent_type, "node_id": node_id}
+
+
 def _write_json(
     path: Path,
     stochastic: list | None = None,
@@ -65,6 +102,8 @@ def _write_json(
     instructions: list | None = None,
     comments: list | None = None,
     kernel_symbols: list | None = None,
+    kernel_dispatch: list | None = None,
+    agents: list | None = None,
 ) -> Path:
     data = {
         "rocprofiler-sdk-tool": [
@@ -74,6 +113,9 @@ def _write_json(
                         stochastic if stochastic is not None else []
                     ),
                     "pc_sample_host_trap": (host_trap if host_trap is not None else []),
+                    "kernel_dispatch": (
+                        kernel_dispatch if kernel_dispatch is not None else []
+                    ),
                 },
                 "strings": {
                     "pc_sample_instructions": (
@@ -84,32 +126,11 @@ def _write_json(
                 "kernel_symbols": (
                     kernel_symbols if kernel_symbols is not None else []
                 ),
+                "agents": (agents if agents is not None else []),
             }
         ]
     }
     path.write_text(json.dumps(data))
-    return path
-
-
-def _write_kernel_trace(
-    path: Path,
-    rows: list[tuple],
-) -> Path:
-    lines = ["Dispatch_Id,Kernel_Id,Kernel_Name"]
-    for dispatch_id, kernel_id, kernel_name in rows:
-        lines.append(f"{dispatch_id},{kernel_id},{kernel_name}")
-    path.write_text("\n".join(lines) + "\n")
-    return path
-
-
-def write_pc_sampling_csv(
-    path: Path,
-    rows: list[tuple],
-) -> Path:
-    lines = ["Correlation_Id,Instruction,Instruction_Comment"]
-    for corr_id, instruction, comment in rows:
-        lines.append(f"{corr_id},{instruction},{comment}")
-    path.write_text("\n".join(lines) + "\n")
     return path
 
 
@@ -400,18 +421,8 @@ def test_search_pc_sampling_record_field_edges(
 def _setup_per_kernel_files(
     tmp_path: Path,
     method: str = "host_trap",
-) -> tuple[Path, Path]:
-    """Create JSON + kernel trace CSV for per-kernel tests."""
-    kernel_trace = tmp_path / "kt.csv"
-    _write_kernel_trace(
-        kernel_trace,
-        [
-            (0, 100, "vecCopy"),
-            (1, 100, "vecCopy"),
-            (2, 101, "vecAdd"),
-        ],
-    )
-
+) -> Path:
+    """Create the results JSON for per-kernel tests."""
     samples = [
         _make_record(100, 0x10, 0, dispatch_id=0),
         _make_record(
@@ -427,7 +438,7 @@ def _setup_per_kernel_files(
 
     key = "host_trap" if method == "host_trap" else "stochastic"
     kwargs = {key: samples}
-    json_path = _write_json(
+    return _write_json(
         tmp_path / "r.json",
         instructions=["v_mov_b32", "s_waitcnt", "v_add_f32"],
         comments=[
@@ -436,18 +447,16 @@ def _setup_per_kernel_files(
             "/src/vadd.cpp:30",
         ],
         kernel_symbols=[
-            {
-                "code_object_id": 100,
-                "formatted_kernel_name": "vecCopy",
-            },
-            {
-                "code_object_id": 101,
-                "formatted_kernel_name": "vecAdd",
-            },
+            _make_kernel_symbol(100, 100, "vecCopy"),
+            _make_kernel_symbol(101, 101, "vecAdd"),
+        ],
+        kernel_dispatch=[
+            _make_dispatch(0, 100),
+            _make_dispatch(1, 100),
+            _make_dispatch(2, 101),
         ],
         **kwargs,
     )
-    return json_path, kernel_trace
 
 
 @pytest.mark.parametrize(
@@ -478,11 +487,10 @@ def test_load_per_kernel_schema_and_sort(
         "stall_reason",
     ]
     expected_columns = host_trap_cols if method == "host_trap" else stochastic_cols
-    json_path, kt = _setup_per_kernel_files(tmp_path, method=method)
+    json_path = _setup_per_kernel_files(tmp_path, method=method)
     df = load_pc_sampling_data_per_kernel(
         method=method,
         file_name=json_path,
-        csv_file_name=kt,
         kernel_name="vecCopy",
         sorting_type=sorting_type,
     )
@@ -502,22 +510,20 @@ def write_per_kernel_guard_files(
     tmp_path: Path,
     instructions: list | None,
     comments: list | None,
-) -> tuple[Path, Path]:
-    """Per-kernel JSON + trace with caller-controlled instruction/comment tables."""
-    kt = tmp_path / "kt.csv"
-    _write_kernel_trace(kt, [(0, 100, "vecCopy"), (1, 100, "vecCopy")])
+) -> Path:
+    """Per-kernel JSON with caller-controlled instruction/comment tables."""
     samples = [
         _make_record(100, 0x10, 0, dispatch_id=0),
         _make_record(100, 0x20, 1, dispatch_id=1),
     ]
-    json_path = _write_json(
+    return _write_json(
         tmp_path / "r.json",
         host_trap=samples,
         instructions=instructions,
         comments=comments,
-        kernel_symbols=[{"code_object_id": 100, "formatted_kernel_name": "vecCopy"}],
+        kernel_symbols=[_make_kernel_symbol(100, 100, "vecCopy")],
+        kernel_dispatch=[_make_dispatch(0, 100), _make_dispatch(1, 100)],
     )
-    return json_path, kt
 
 
 @pytest.mark.parametrize(
@@ -547,11 +553,10 @@ def test_load_per_kernel_out_of_range_index_guards(
     source_line_none: str,
 ) -> None:
     """An inst_index past the end of a string table yields None, not an error."""
-    json_path, kt = write_per_kernel_guard_files(tmp_path, instructions, comments)
+    json_path = write_per_kernel_guard_files(tmp_path, instructions, comments)
     df = load_pc_sampling_data_per_kernel(
         method="host_trap",
         file_name=json_path,
-        csv_file_name=kt,
         kernel_name="vecCopy",
         sorting_type="offset",
     )
@@ -573,12 +578,11 @@ def test_load_per_kernel_empty_string_table_exits(
     comments: list | None,
 ) -> None:
     """An empty instruction/comment table is treated as missing and exits."""
-    json_path, kt = write_per_kernel_guard_files(tmp_path, instructions, comments)
+    json_path = write_per_kernel_guard_files(tmp_path, instructions, comments)
     with pytest.raises(SystemExit):
         load_pc_sampling_data_per_kernel(
             method="host_trap",
             file_name=json_path,
-            csv_file_name=kt,
             kernel_name="vecCopy",
             sorting_type="offset",
         )
@@ -598,8 +602,6 @@ def test_load_per_kernel_multi_dispatch_groupby(
     tmp_path: Path,
 ) -> None:
     """Two dispatch IDs at one (code_object_id, offset) collapse to a summed row."""
-    kt = tmp_path / "kt.csv"
-    _write_kernel_trace(kt, [(0, 100, "vecCopy"), (1, 100, "vecCopy")])
     samples = [
         _make_record(
             100,
@@ -623,12 +625,12 @@ def test_load_per_kernel_multi_dispatch_groupby(
         stochastic=samples,
         instructions=["v_mov", "v_add"],
         comments=["/s/a.cpp:1", "/s/a.cpp:2"],
-        kernel_symbols=[{"code_object_id": 100, "formatted_kernel_name": "vecCopy"}],
+        kernel_symbols=[_make_kernel_symbol(100, 100, "vecCopy")],
+        kernel_dispatch=[_make_dispatch(0, 100), _make_dispatch(1, 100)],
     )
     df = load_pc_sampling_data_per_kernel(
         method="stochastic",
         file_name=json_path,
-        csv_file_name=kt,
         kernel_name="vecCopy",
         sorting_type="count",
     )
@@ -643,18 +645,17 @@ def test_load_per_kernel_multi_dispatch_groupby(
     }
 
 
-def test_load_per_kernel_kernel_not_in_trace(
+def test_load_per_kernel_kernel_not_found(
     tmp_path: Path,
 ) -> None:
     """
     Return an empty DataFrame when the requested kernel name
-    is absent from the trace.
+    is absent from the kernel symbols.
     """
-    json_path, kt = _setup_per_kernel_files(tmp_path)
+    json_path = _setup_per_kernel_files(tmp_path)
     df = load_pc_sampling_data_per_kernel(
         method="host_trap",
         file_name=json_path,
-        csv_file_name=kt,
         kernel_name="nonexistent",
         sorting_type="offset",
     )
@@ -665,17 +666,18 @@ def test_load_per_kernel_no_pc_sample_key(
     tmp_path: Path,
 ) -> None:
     """
-    When the JSON has no matching pc_sample key,
+    When the JSON has no populated pc_sample array,
     search_key_in_json calls console_error which exits.
     """
-    kt = tmp_path / "kt.csv"
-    _write_kernel_trace(kt, [(0, 100, "vecCopy")])
-    json_path = _write_json(tmp_path / "r.json")
+    json_path = _write_json(
+        tmp_path / "r.json",
+        kernel_symbols=[_make_kernel_symbol(100, 100, "vecCopy")],
+        kernel_dispatch=[_make_dispatch(0, 100)],
+    )
     with pytest.raises(SystemExit):
         load_pc_sampling_data_per_kernel(
             method="host_trap",
             file_name=json_path,
-            csv_file_name=kt,
             kernel_name="vecCopy",
             sorting_type="offset",
         )
@@ -685,12 +687,11 @@ def test_load_per_kernel_invalid_sorting_type(
     tmp_path: Path,
 ) -> None:
     """Return an empty DataFrame and log an error for an unrecognized sorting type."""
-    json_path, kt = _setup_per_kernel_files(tmp_path)
+    json_path = _setup_per_kernel_files(tmp_path)
     with patch("utils.parser.console_error"):
         df = load_pc_sampling_data_per_kernel(
             method="host_trap",
             file_name=json_path,
-            csv_file_name=kt,
             kernel_name="vecCopy",
             sorting_type="invalid",
         )
@@ -720,10 +721,10 @@ def test_load_pc_sampling_data_none_prefix(
     assert df.empty
 
 
-def test_load_pc_sampling_data_missing_kernel_trace(
+def test_load_pc_sampling_data_missing_results_json(
     tmp_path: Path,
 ) -> None:
-    """Return an empty DataFrame when the kernel trace CSV does not exist."""
+    """Return an empty DataFrame when ps_file_results.json does not exist."""
     workload = schema.Workload()
     df = load_pc_sampling_data(workload, str(tmp_path), "ps_file", "count")
     assert df.empty
@@ -734,17 +735,19 @@ def test_load_pc_sampling_data_no_filter(
     tmp_path: Path,
     method: str,
 ) -> None:
-    """Load grouped data from the method-specific CSV when no kernel filter is set."""
-    write_pc_sampling_csv(
-        tmp_path / f"ps_file_pc_sampling_{method}.csv",
-        [
-            (0, "v_mov_b32 v0 v1", "/src/vcopy.cpp:42"),
-            (0, "s_waitcnt vmcnt(0)", "/src/vcopy.cpp:43"),
-            (1, "v_mov_b32 v0 v1", "/src/vcopy.cpp:42"),
-        ],
+    """Load grouped data from the results json when no kernel filter is set."""
+    samples = [
+        _make_record(100, 0x10, 0, dispatch_id=0),
+        _make_record(100, 0x20, 1, dispatch_id=0),
+        _make_record(100, 0x10, 0, dispatch_id=1),
+    ]
+    _write_json(
+        tmp_path / "ps_file_results.json",
+        instructions=["v_mov_b32 v0 v1", "s_waitcnt vmcnt(0)"],
+        comments=["/src/vcopy.cpp:42", "/src/vcopy.cpp:43"],
+        kernel_symbols=[_make_kernel_symbol(100, 100, "vecCopy")],
+        **{method: samples},
     )
-    kt = tmp_path / "ps_file_kernel_trace.csv"
-    kt.write_text("Dispatch_Id,Kernel_Id,Kernel_Name\n0,100,vecCopy\n1,100,vecCopy\n")
     workload = schema.Workload()
     df = load_pc_sampling_data(workload, str(tmp_path), "ps_file", "count")
     assert not df.empty
@@ -755,6 +758,8 @@ def test_load_pc_sampling_data_no_filter(
         "count",
     ]
     assert df.iloc[0]["source_line"].startswith("...")
+    assert df.iloc[0]["count"] == 2
+    assert df.iloc[0]["Kernel_Name"] == "vecCopy"
 
 
 def test_load_pc_sampling_data_multiple_kernels_error(
@@ -764,11 +769,9 @@ def test_load_pc_sampling_data_multiple_kernels_error(
     Return an empty DataFrame and log an error when more
     than one kernel ID is filtered.
     """
-    kt = tmp_path / "ps_file_kernel_trace.csv"
-    kt.write_text("Dispatch_Id,Kernel_Id,Kernel_Name\n0,100,vecCopy\n")
-    write_pc_sampling_csv(
-        tmp_path / "ps_file_pc_sampling_stochastic.csv",
-        [(0, "v_mov", "/src/v.cpp:1")],
+    _write_json(
+        tmp_path / "ps_file_results.json",
+        stochastic=[_make_record(100, 0x10, 0, dispatch_id=0)],
     )
     workload = schema.Workload(filter_kernel_ids=[0, 1])
     with patch("utils.parser.console_error"):
@@ -785,24 +788,13 @@ def test_load_pc_sampling_data_single_kernel_valid(
     tmp_path: Path,
 ) -> None:
     """Return per-kernel data when exactly one valid kernel ID is filtered."""
-    kt = tmp_path / "ps_file_kernel_trace.csv"
-    kt.write_text("Dispatch_Id,Kernel_Id,Kernel_Name\n0,100,vecCopy\n")
-    write_pc_sampling_csv(
-        tmp_path / "ps_file_pc_sampling_stochastic.csv",
-        [(0, "v_mov", "/src/v.cpp:1")],
-    )
-    samples = [_make_record(100, 0x10, 0, dispatch_id=0)]
     _write_json(
         tmp_path / "ps_file_results.json",
-        stochastic=samples,
+        stochastic=[_make_record(100, 0x10, 0, dispatch_id=0)],
         instructions=["v_mov_b32"],
         comments=["/src/vcopy.cpp:42"],
-        kernel_symbols=[
-            {
-                "code_object_id": 100,
-                "formatted_kernel_name": "vecCopy",
-            }
-        ],
+        kernel_symbols=[_make_kernel_symbol(100, 100, "vecCopy")],
+        kernel_dispatch=[_make_dispatch(0, 100)],
     )
     kernel_top_df = pd.DataFrame({"Kernel_Name": ["vecCopy"]})
     workload = schema.Workload(
@@ -820,15 +812,11 @@ def test_load_pc_sampling_data_single_kernel_out_of_bounds(
     Return an empty DataFrame when the filtered kernel ID
     exceeds the kernel-top table range.
     """
-    kt = tmp_path / "ps_file_kernel_trace.csv"
-    kt.write_text("Dispatch_Id,Kernel_Id,Kernel_Name\n0,100,vecCopy\n")
-    write_pc_sampling_csv(
-        tmp_path / "ps_file_pc_sampling_stochastic.csv",
-        [(0, "v_mov", "/src/v.cpp:1")],
-    )
     _write_json(
         tmp_path / "ps_file_results.json",
         stochastic=[_make_record(100, 0x10, 0, dispatch_id=0)],
+        kernel_symbols=[_make_kernel_symbol(100, 100, "vecCopy")],
+        kernel_dispatch=[_make_dispatch(0, 100)],
     )
     kernel_top_df = pd.DataFrame({"Kernel_Name": ["vecCopy", "vecAdd"]})
     workload = schema.Workload(
@@ -898,25 +886,10 @@ def test_nullify_unevaluated_metrics_empty_df_skipped() -> None:
 # ═══════════════════════════════════════════════════════════════
 
 
-def _write_pc_kernel_trace(path: Path, rows: list[tuple]) -> Path:
-    """Write a minimal ps_file_kernel_trace.csv.
-
-    Each *row* is ``(agent_id, dispatch_id, kernel_name, start_ts, end_ts)``.
-    Only the columns actually read by ``process_pc_sampling_kernel_trace``
-    are written (the existing ``_write_kernel_trace`` uses a different
-    schema without Agent_Id or timestamps, so it cannot be reused here).
-    """
-    lines = ["Agent_Id,Dispatch_Id,Kernel_Name,Start_Timestamp,End_Timestamp"]
-    for agent_id, dispatch_id, kernel_name, start_ts, end_ts in rows:
-        lines.append(f"{agent_id},{dispatch_id},{kernel_name},{start_ts},{end_ts}")
-    path.write_text("\n".join(lines) + "\n")
-    return path
-
-
-def test_process_pc_sampling_missing_trace_returns_empty(
+def test_process_pc_sampling_missing_results_returns_empty(
     tmp_path: Path,
 ) -> None:
-    """Return empty DataFrame with expected columns when trace is absent."""
+    """Return empty DataFrame with expected columns when results json is absent."""
     df = process_pc_sampling_kernel_trace(str(tmp_path))
     assert df.empty
     assert list(df.columns) == [
@@ -929,17 +902,27 @@ def test_process_pc_sampling_missing_trace_returns_empty(
 
 
 def test_process_pc_sampling_with_agent_info(tmp_path: Path) -> None:
-    """Verify column selection, GPU mapping, timestamps, and extra column dropping."""
-    _write_pc_kernel_trace(
-        tmp_path / "ps_file_kernel_trace.csv",
-        [
-            ("Agent 2", 1, "vecCopy", 1981199661678356, 1981199662835032),
-            ("Agent 3", 2, "vecAdd", 2000, 3000),
-            ("Agent 99", 3, "vecMul", 4000, 5000),
+    """Verify column selection, GPU mapping, kernel names, and timestamps."""
+    _write_json(
+        tmp_path / "ps_file_results.json",
+        kernel_symbols=[
+            _make_kernel_symbol(12, 2, "vecCopy"),
+            _make_kernel_symbol(13, 2, "vecAdd"),
+            _make_kernel_symbol(14, 2, "vecMul"),
+        ],
+        kernel_dispatch=[
+            _make_dispatch(
+                1, 12, agent_handle=20, start=1981199661678356, end=1981199662835032
+            ),
+            _make_dispatch(2, 13, agent_handle=30, start=2000, end=3000),
+            _make_dispatch(3, 14, agent_handle=99, start=4000, end=5000),
+        ],
+        agents=[
+            _make_agent(handle=10, node_id=1, agent_type=1),
+            _make_agent(handle=20, node_id=2, agent_type=2),
+            _make_agent(handle=30, node_id=3, agent_type=2),
         ],
     )
-    agent_csv = tmp_path / "ps_file_agent_info.csv"
-    agent_csv.write_text("Node_Id,Agent_Type\n1,CPU\n2,GPU\n3,GPU\n")
 
     df = process_pc_sampling_kernel_trace(str(tmp_path))
 
@@ -953,7 +936,7 @@ def test_process_pc_sampling_with_agent_info(tmp_path: Path) -> None:
         "GPU_ID",
     ]
 
-    # Multi-GPU mapping: Agent 2 -> GPU 0, Agent 3 -> GPU 1, unknown -> 0
+    # Multi-GPU mapping: handle 20 -> GPU 0, handle 30 -> GPU 1, unknown -> 0
     assert df["GPU_ID"].tolist() == [0, 1, 0]
     assert df["Kernel_Name"].tolist() == ["vecCopy", "vecAdd", "vecMul"]
 
@@ -962,11 +945,13 @@ def test_process_pc_sampling_with_agent_info(tmp_path: Path) -> None:
     assert df["End_Timestamp"].iloc[0] == 1981199662835032
 
 
-def test_process_pc_sampling_no_agent_info(tmp_path: Path) -> None:
-    """Default GPU_ID to 0 when ps_file_agent_info.csv is missing."""
-    _write_pc_kernel_trace(
-        tmp_path / "ps_file_kernel_trace.csv",
-        [("Agent 99", 1, "vecCopy", 1000, 2000)],
+def test_process_pc_sampling_no_gpu_agents(tmp_path: Path) -> None:
+    """Default GPU_ID to 0 when no GPU agents are present."""
+    _write_json(
+        tmp_path / "ps_file_results.json",
+        kernel_symbols=[_make_kernel_symbol(12, 2, "vecCopy")],
+        kernel_dispatch=[_make_dispatch(1, 12, agent_handle=99, start=1000, end=2000)],
+        agents=[_make_agent(handle=10, node_id=1, agent_type=1)],
     )
     df = process_pc_sampling_kernel_trace(str(tmp_path))
     assert len(df) == 1
@@ -974,46 +959,41 @@ def test_process_pc_sampling_no_agent_info(tmp_path: Path) -> None:
 
 
 # ═══════════════════════════════════════════════════════════════
-# build_agent_to_gpu_map
+# build_agent_to_gpu_map_from_json
 # ═══════════════════════════════════════════════════════════════
 
 
-def test_build_agent_to_gpu_map_single_gpu(
-    tmp_path: Path,
-) -> None:
+def test_build_agent_to_gpu_map_single_gpu() -> None:
     """Map one GPU agent to GPU index 0, ignoring CPU agents."""
-    csv_path = tmp_path / "agent_info.csv"
-    csv_path.write_text("Node_Id,Agent_Type\n1,CPU\n2,GPU\n")
-    result = build_agent_to_gpu_map(csv_path)
-    assert result == {"Agent 2": 0}
+    agents = [
+        _make_agent(handle=10, node_id=1, agent_type=1),
+        _make_agent(handle=20, node_id=2, agent_type=2),
+    ]
+    assert build_agent_to_gpu_map_from_json(agents) == {20: 0}
 
 
-def test_build_agent_to_gpu_map_two_gpus(
-    tmp_path: Path,
-) -> None:
-    """Assign sequential GPU indices to multiple GPU agents sorted by Node_Id."""
-    csv_path = tmp_path / "agent_info.csv"
-    csv_path.write_text("Node_Id,Agent_Type\n1,CPU\n3,GPU\n2,GPU\n")
-    result = build_agent_to_gpu_map(csv_path)
-    assert result == {"Agent 2": 0, "Agent 3": 1}
+def test_build_agent_to_gpu_map_two_gpus() -> None:
+    """Assign sequential GPU indices to multiple GPU agents sorted by node_id."""
+    agents = [
+        _make_agent(handle=10, node_id=1, agent_type=1),
+        _make_agent(handle=30, node_id=3, agent_type=2),
+        _make_agent(handle=20, node_id=2, agent_type=2),
+    ]
+    assert build_agent_to_gpu_map_from_json(agents) == {20: 0, 30: 1}
 
 
-def test_build_agent_to_gpu_map_no_gpu_agents(
-    tmp_path: Path,
-) -> None:
-    """Return an empty map when no GPU agents are present in the CSV."""
-    csv_path = tmp_path / "agent_info.csv"
-    csv_path.write_text("Node_Id,Agent_Type\n1,CPU\n2,CPU\n")
-    result = build_agent_to_gpu_map(csv_path)
-    assert result == {}
+def test_build_agent_to_gpu_map_no_gpu_agents() -> None:
+    """Return an empty map when no GPU agents are present."""
+    agents = [
+        _make_agent(handle=10, node_id=1, agent_type=1),
+        _make_agent(handle=11, node_id=2, agent_type=1),
+    ]
+    assert build_agent_to_gpu_map_from_json(agents) == {}
 
 
-def test_build_agent_to_gpu_map_missing_file(
-    tmp_path: Path,
-) -> None:
-    """Return an empty map when the agent info CSV file does not exist."""
-    result = build_agent_to_gpu_map(tmp_path / "nonexistent.csv")
-    assert result == {}
+def test_build_agent_to_gpu_map_empty() -> None:
+    """Return an empty map when the agents list is empty."""
+    assert build_agent_to_gpu_map_from_json([]) == {}
 
 
 # ═══════════════════════════════════════════════════════════════
