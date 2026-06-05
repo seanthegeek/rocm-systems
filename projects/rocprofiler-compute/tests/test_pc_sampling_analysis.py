@@ -827,6 +827,27 @@ def test_load_pc_sampling_data_single_kernel_out_of_bounds(
     assert df.empty
 
 
+def test_load_pc_sampling_data_method_not_detected(
+    tmp_path: Path,
+) -> None:
+    """
+    Return an empty DataFrame for a single-kernel filter when neither
+    pc_sample array is populated (no detectable method).
+    """
+    _write_json(
+        tmp_path / "ps_file_results.json",
+        kernel_symbols=[_make_kernel_symbol(100, 100, "vecCopy")],
+        kernel_dispatch=[_make_dispatch(0, 100)],
+    )
+    kernel_top_df = pd.DataFrame({"Kernel_Name": ["vecCopy"]})
+    workload = schema.Workload(
+        filter_kernel_ids=[0],
+        dfs={PMC_KERNEL_TOP_TABLE_ID: kernel_top_df},
+    )
+    df = load_pc_sampling_data(workload, str(tmp_path), "ps_file", "count")
+    assert df.empty
+
+
 # ═══════════════════════════════════════════════════════════════
 # nullify_unevaluated_metric_values
 # ═══════════════════════════════════════════════════════════════
