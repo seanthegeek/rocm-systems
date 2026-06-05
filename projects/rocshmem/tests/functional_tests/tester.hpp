@@ -162,16 +162,16 @@
   X(ReduceOnStream,            117)  \
   X(HostCtxCreate,             118)  \
   X(TeamSplit2D,               119)  \
-  X(IpcHostPutmem,             120)  \
-  X(IpcHostGetmem,             121)  \
-  X(IpcHostAmoFAdd,            122)  \
-  X(IpcHostAmoFCswap,          123)  \
-  X(IpcHostCtxPutmem,          124)  \
-  X(IpcHostCtxGetmem,          125)  \
-  X(IpcHostIntAmoFAdd,         126)  \
-  X(IpcHostIntAmoFCswap,       127)  \
-  X(IpcHostAmoAllPes,          128)  \
-  X(IpcHostAmoSelf,            129)
+  X(HostPutmem,                120)  \
+  X(HostGetmem,                121)  \
+  X(HostAmoFAdd,               122)  \
+  X(HostAmoFCswap,             123)  \
+  X(HostCtxPutmem,             124)  \
+  X(HostCtxGetmem,             125)  \
+  X(HostIntAmoFAdd,            126)  \
+  X(HostIntAmoFCswap,          127)  \
+  X(HostAmoAllPes,             128)  \
+  X(HostAmoSelf,               129)
 
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {

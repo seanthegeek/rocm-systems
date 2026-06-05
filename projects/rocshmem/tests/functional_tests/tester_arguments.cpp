@@ -315,8 +315,8 @@ void TesterArguments::get_arguments() {
     case TeamCtxSharedInfraTestType:
     case FenceOrderFanoutTestType:
     case TeamSplit2DTestType:
-    case IpcHostAmoAllPesTestType:
-    case IpcHostAmoSelfTestType:
+    case HostAmoAllPesTestType:
+    case HostAmoSelfTestType:
       requires_two_pes = false;
       break;
     default:
