@@ -33,7 +33,7 @@ PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_"
 # ── Helpers for building synthetic JSON / records ────────────
 
 
-def _make_record(
+def make_record(
     code_object_id: int,
     offset: int,
     inst_index: int,
@@ -58,7 +58,7 @@ def _make_record(
     }
 
 
-def _make_dispatch(
+def make_dispatch(
     dispatch_id: int,
     kernel_id: int,
     agent_handle: int = 1,
@@ -77,7 +77,7 @@ def _make_dispatch(
     }
 
 
-def _make_kernel_symbol(
+def make_kernel_symbol(
     kernel_id: int,
     code_object_id: int,
     formatted_kernel_name: str,
@@ -90,13 +90,12 @@ def _make_kernel_symbol(
     }
 
 
-def _make_agent(handle: int, node_id: int, agent_type: int) -> dict:
+def make_agent(handle: int, node_id: int, agent_type: int) -> dict:
     """An agents entry (type 1 == CPU, type 2 == GPU)."""
     return {"id": {"handle": handle}, "type": agent_type, "node_id": node_id}
 
 
-def _write_json(
-    path: Path,
+def make_tool_data(
     stochastic: list | None = None,
     host_trap: list | None = None,
     instructions: list | None = None,
@@ -104,33 +103,28 @@ def _write_json(
     kernel_symbols: list | None = None,
     kernel_dispatch: list | None = None,
     agents: list | None = None,
-) -> Path:
-    data = {
-        "rocprofiler-sdk-tool": [
-            {
-                "buffer_records": {
-                    "pc_sample_stochastic": (
-                        stochastic if stochastic is not None else []
-                    ),
-                    "pc_sample_host_trap": (host_trap if host_trap is not None else []),
-                    "kernel_dispatch": (
-                        kernel_dispatch if kernel_dispatch is not None else []
-                    ),
-                },
-                "strings": {
-                    "pc_sample_instructions": (
-                        instructions if instructions is not None else []
-                    ),
-                    "pc_sample_comments": (comments if comments is not None else []),
-                },
-                "kernel_symbols": (
-                    kernel_symbols if kernel_symbols is not None else []
-                ),
-                "agents": (agents if agents is not None else []),
-            }
-        ]
+) -> dict:
+    """Build a single ``rocprofiler-sdk-tool[0]`` dict for the analyze paths."""
+    return {
+        "buffer_records": {
+            "pc_sample_stochastic": stochastic if stochastic is not None else [],
+            "pc_sample_host_trap": host_trap if host_trap is not None else [],
+            "kernel_dispatch": kernel_dispatch if kernel_dispatch is not None else [],
+        },
+        "strings": {
+            "pc_sample_instructions": (
+                instructions if instructions is not None else []
+            ),
+            "pc_sample_comments": comments if comments is not None else [],
+        },
+        "kernel_symbols": kernel_symbols if kernel_symbols is not None else [],
+        "agents": agents if agents is not None else [],
     }
-    path.write_text(json.dumps(data))
+
+
+def write_results_json(path: Path, **kwargs) -> Path:
+    """Write a results json wrapping a single tool record built from kwargs."""
+    path.write_text(json.dumps({"rocprofiler-sdk-tool": [make_tool_data(**kwargs)]}))
     return path
 
 
@@ -167,7 +161,7 @@ def test_search_pc_sampling_record_empty_list_returns_none() -> None:
 
 def test_search_pc_sampling_record_single_dict_input_issued() -> None:
     """Accept a single dict (not a list) and count it as one issued sample."""
-    record = _make_record(
+    record = make_record(
         code_object_id=1,
         offset=0x10,
         inst_index=0,
@@ -190,9 +184,9 @@ def test_search_pc_sampling_record_groups_by_key() -> None:
     and sum counts per group.
     """
     records = [
-        _make_record(1, 0x10, 0, dispatch_id=0),
-        _make_record(1, 0x10, 0, dispatch_id=1),
-        _make_record(1, 0x20, 1, dispatch_id=2),
+        make_record(1, 0x10, 0, dispatch_id=0),
+        make_record(1, 0x10, 0, dispatch_id=1),
+        make_record(1, 0x20, 1, dispatch_id=2),
     ]
     result = search_pc_sampling_record(records)
     assert result is not None
@@ -204,7 +198,7 @@ def test_search_pc_sampling_record_groups_by_key() -> None:
 def test_search_pc_sampling_record_stall_reason_aggregation() -> None:
     """Aggregate distinct stall reasons and track stalled vs issued counts."""
     records = [
-        _make_record(
+        make_record(
             1,
             0x10,
             0,
@@ -212,7 +206,7 @@ def test_search_pc_sampling_record_stall_reason_aggregation() -> None:
             wave_issued=False,
             stall_reason=f"{PREFIX}WAITCNT",
         ),
-        _make_record(
+        make_record(
             1,
             0x10,
             0,
@@ -234,9 +228,9 @@ def test_search_pc_sampling_record_stall_reason_aggregation() -> None:
 def test_search_pc_sampling_record_dispatch_id_collection() -> None:
     """Collect unique dispatch IDs across duplicate records for the same key."""
     records = [
-        _make_record(1, 0x10, 0, dispatch_id=0),
-        _make_record(1, 0x10, 0, dispatch_id=0),
-        _make_record(1, 0x10, 0, dispatch_id=1),
+        make_record(1, 0x10, 0, dispatch_id=0),
+        make_record(1, 0x10, 0, dispatch_id=0),
+        make_record(1, 0x10, 0, dispatch_id=1),
     ]
     result = search_pc_sampling_record(records)
     assert result is not None
@@ -246,7 +240,7 @@ def test_search_pc_sampling_record_dispatch_id_collection() -> None:
 
 def test_search_pc_sampling_record_skips_none_fields() -> None:
     """Skip records whose code_object_id or offset is None."""
-    valid = _make_record(1, 0x10, 0, dispatch_id=0)
+    valid = make_record(1, 0x10, 0, dispatch_id=0)
     invalid = {
         "inst_index": 0,
         "record": {
@@ -290,8 +284,8 @@ def make_record_without_snapshot(
     [
         pytest.param(
             [
-                _make_record(1, 0x10, 0, dispatch_id=0, wave_issued=True),
-                _make_record(1, 0x10, 0, dispatch_id=1, wave_issued=True),
+                make_record(1, 0x10, 0, dispatch_id=0, wave_issued=True),
+                make_record(1, 0x10, 0, dispatch_id=1, wave_issued=True),
             ],
             {
                 "total": 2,
@@ -304,7 +298,7 @@ def make_record_without_snapshot(
         ),
         pytest.param(
             [
-                _make_record(
+                make_record(
                     1,
                     0x10,
                     0,
@@ -312,7 +306,7 @@ def make_record_without_snapshot(
                     wave_issued=False,
                     stall_reason=f"{PREFIX}WAITCNT",
                 ),
-                _make_record(
+                make_record(
                     1,
                     0x10,
                     0,
@@ -347,7 +341,7 @@ def make_record_without_snapshot(
         ),
         pytest.param(
             [
-                _make_record(
+                make_record(
                     1,
                     0x10,
                     0,
@@ -367,7 +361,7 @@ def make_record_without_snapshot(
         ),
         pytest.param(
             [
-                _make_record(
+                make_record(
                     1,
                     0x10,
                     0,
@@ -386,7 +380,7 @@ def make_record_without_snapshot(
             id="unknown_stall_key",
         ),
         pytest.param(
-            [_make_record(1, 0x10, 0, dispatch_id=None, wave_issued=True)],
+            [make_record(1, 0x10, 0, dispatch_id=None, wave_issued=True)],
             {
                 "total": 1,
                 "issued": 1,
@@ -418,28 +412,30 @@ def test_search_pc_sampling_record_field_edges(
 # ═══════════════════════════════════════════════════════════════
 
 
-def _setup_per_kernel_files(
-    tmp_path: Path,
+def setup_per_kernel_data(
     method: str = "host_trap",
-) -> Path:
-    """Create the results JSON for per-kernel tests."""
+) -> dict:
+    """Build tool_data for per-kernel tests.
+
+    vecCopy (kernel_id 100) and vecAdd (kernel_id 101) share code object 5,
+    so kernels are distinguished only by kernel_id via dispatch attribution.
+    """
     samples = [
-        _make_record(100, 0x10, 0, dispatch_id=0),
-        _make_record(
-            100,
+        make_record(5, 0x10, 0, dispatch_id=0),
+        make_record(
+            5,
             0x20,
             1,
             dispatch_id=1,
             wave_issued=False,
             stall_reason=f"{PREFIX}WAITCNT",
         ),
-        _make_record(101, 0x10, 2, dispatch_id=2),
+        make_record(5, 0x30, 2, dispatch_id=2),
     ]
 
     key = "host_trap" if method == "host_trap" else "stochastic"
     kwargs = {key: samples}
-    return _write_json(
-        tmp_path / "r.json",
+    return make_tool_data(
         instructions=["v_mov_b32", "s_waitcnt", "v_add_f32"],
         comments=[
             "/src/vcopy.cpp:42",
@@ -447,13 +443,13 @@ def _setup_per_kernel_files(
             "/src/vadd.cpp:30",
         ],
         kernel_symbols=[
-            _make_kernel_symbol(100, 100, "vecCopy"),
-            _make_kernel_symbol(101, 101, "vecAdd"),
+            make_kernel_symbol(100, 5, "vecCopy"),
+            make_kernel_symbol(101, 5, "vecAdd"),
         ],
         kernel_dispatch=[
-            _make_dispatch(0, 100),
-            _make_dispatch(1, 100),
-            _make_dispatch(2, 101),
+            make_dispatch(0, 100),
+            make_dispatch(1, 100),
+            make_dispatch(2, 101),
         ],
         **kwargs,
     )
@@ -487,17 +483,17 @@ def test_load_per_kernel_schema_and_sort(
         "stall_reason",
     ]
     expected_columns = host_trap_cols if method == "host_trap" else stochastic_cols
-    json_path = _setup_per_kernel_files(tmp_path, method=method)
+    tool_data = setup_per_kernel_data(method=method)
     df = load_pc_sampling_data_per_kernel(
         method=method,
-        file_name=json_path,
+        tool_data=tool_data,
         kernel_name="vecCopy",
         sorting_type=sorting_type,
     )
     assert not df.empty
     assert list(df.columns) == expected_columns
     for _, row in df.iterrows():
-        assert row["code_object_id"] == 100
+        assert row["code_object_id"] == 5
     if sorting_type == "count":
         counts = df["count"].tolist()
         assert counts == sorted(counts, reverse=True)
@@ -506,23 +502,21 @@ def test_load_per_kernel_schema_and_sort(
         assert offsets == sorted(offsets)
 
 
-def write_per_kernel_guard_files(
-    tmp_path: Path,
+def make_per_kernel_guard_data(
     instructions: list | None,
     comments: list | None,
-) -> Path:
-    """Per-kernel JSON with caller-controlled instruction/comment tables."""
+) -> dict:
+    """Per-kernel tool_data with caller-controlled instruction/comment tables."""
     samples = [
-        _make_record(100, 0x10, 0, dispatch_id=0),
-        _make_record(100, 0x20, 1, dispatch_id=1),
+        make_record(5, 0x10, 0, dispatch_id=0),
+        make_record(5, 0x20, 1, dispatch_id=1),
     ]
-    return _write_json(
-        tmp_path / "r.json",
+    return make_tool_data(
         host_trap=samples,
         instructions=instructions,
         comments=comments,
-        kernel_symbols=[_make_kernel_symbol(100, 100, "vecCopy")],
-        kernel_dispatch=[_make_dispatch(0, 100), _make_dispatch(1, 100)],
+        kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
+        kernel_dispatch=[make_dispatch(0, 100), make_dispatch(1, 100)],
     )
 
 
@@ -546,17 +540,16 @@ def write_per_kernel_guard_files(
     ],
 )
 def test_load_per_kernel_out_of_range_index_guards(
-    tmp_path: Path,
     instructions: list | None,
     comments: list | None,
     instruction_none: str,
     source_line_none: str,
 ) -> None:
     """An inst_index past the end of a string table yields None, not an error."""
-    json_path = write_per_kernel_guard_files(tmp_path, instructions, comments)
+    tool_data = make_per_kernel_guard_data(instructions, comments)
     df = load_pc_sampling_data_per_kernel(
         method="host_trap",
-        file_name=json_path,
+        tool_data=tool_data,
         kernel_name="vecCopy",
         sorting_type="offset",
     )
@@ -573,16 +566,15 @@ def test_load_per_kernel_out_of_range_index_guards(
     ],
 )
 def test_load_per_kernel_empty_string_table_exits(
-    tmp_path: Path,
     instructions: list | None,
     comments: list | None,
 ) -> None:
     """An empty instruction/comment table is treated as missing and exits."""
-    json_path = write_per_kernel_guard_files(tmp_path, instructions, comments)
+    tool_data = make_per_kernel_guard_data(instructions, comments)
     with pytest.raises(SystemExit):
         load_pc_sampling_data_per_kernel(
             method="host_trap",
-            file_name=json_path,
+            tool_data=tool_data,
             kernel_name="vecCopy",
             sorting_type="offset",
         )
@@ -598,21 +590,19 @@ def assert_none_kind(column: pd.Series, kind: str) -> None:
         assert not column.isna().any()
 
 
-def test_load_per_kernel_multi_dispatch_groupby(
-    tmp_path: Path,
-) -> None:
+def test_load_per_kernel_multi_dispatch_groupby() -> None:
     """Two dispatch IDs at one (code_object_id, offset) collapse to a summed row."""
     samples = [
-        _make_record(
-            100,
+        make_record(
+            5,
             0x10,
             0,
             dispatch_id=0,
             wave_issued=False,
             stall_reason=f"{PREFIX}WAITCNT",
         ),
-        _make_record(
-            100,
+        make_record(
+            5,
             0x10,
             1,
             dispatch_id=1,
@@ -620,17 +610,16 @@ def test_load_per_kernel_multi_dispatch_groupby(
             stall_reason=f"{PREFIX}ALU_DEPENDENCY",
         ),
     ]
-    json_path = _write_json(
-        tmp_path / "r.json",
+    tool_data = make_tool_data(
         stochastic=samples,
         instructions=["v_mov", "v_add"],
         comments=["/s/a.cpp:1", "/s/a.cpp:2"],
-        kernel_symbols=[_make_kernel_symbol(100, 100, "vecCopy")],
-        kernel_dispatch=[_make_dispatch(0, 100), _make_dispatch(1, 100)],
+        kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
+        kernel_dispatch=[make_dispatch(0, 100), make_dispatch(1, 100)],
     )
     df = load_pc_sampling_data_per_kernel(
         method="stochastic",
-        file_name=json_path,
+        tool_data=tool_data,
         kernel_name="vecCopy",
         sorting_type="count",
     )
@@ -645,53 +634,46 @@ def test_load_per_kernel_multi_dispatch_groupby(
     }
 
 
-def test_load_per_kernel_kernel_not_found(
-    tmp_path: Path,
-) -> None:
+def test_load_per_kernel_kernel_not_found() -> None:
     """
     Return an empty DataFrame when the requested kernel name
     is absent from the kernel symbols.
     """
-    json_path = _setup_per_kernel_files(tmp_path)
+    tool_data = setup_per_kernel_data()
     df = load_pc_sampling_data_per_kernel(
         method="host_trap",
-        file_name=json_path,
+        tool_data=tool_data,
         kernel_name="nonexistent",
         sorting_type="offset",
     )
     assert df.empty
 
 
-def test_load_per_kernel_no_pc_sample_key(
-    tmp_path: Path,
-) -> None:
+def test_load_per_kernel_no_pc_sample_key() -> None:
     """
-    When the JSON has no populated pc_sample array,
-    search_key_in_json calls console_error which exits.
+    When the tool data has no populated pc_sample array,
+    the per-kernel loader calls console_error which exits.
     """
-    json_path = _write_json(
-        tmp_path / "r.json",
-        kernel_symbols=[_make_kernel_symbol(100, 100, "vecCopy")],
-        kernel_dispatch=[_make_dispatch(0, 100)],
+    tool_data = make_tool_data(
+        kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
+        kernel_dispatch=[make_dispatch(0, 100)],
     )
     with pytest.raises(SystemExit):
         load_pc_sampling_data_per_kernel(
             method="host_trap",
-            file_name=json_path,
+            tool_data=tool_data,
             kernel_name="vecCopy",
             sorting_type="offset",
         )
 
 
-def test_load_per_kernel_invalid_sorting_type(
-    tmp_path: Path,
-) -> None:
+def test_load_per_kernel_invalid_sorting_type() -> None:
     """Return an empty DataFrame and log an error for an unrecognized sorting type."""
-    json_path = _setup_per_kernel_files(tmp_path)
+    tool_data = setup_per_kernel_data()
     with patch("utils.parser.console_error"):
         df = load_pc_sampling_data_per_kernel(
             method="host_trap",
-            file_name=json_path,
+            tool_data=tool_data,
             kernel_name="vecCopy",
             sorting_type="invalid",
         )
@@ -735,17 +717,26 @@ def test_load_pc_sampling_data_no_filter(
     tmp_path: Path,
     method: str,
 ) -> None:
-    """Load grouped data from the results json when no kernel filter is set."""
+    """No-filter aggregates by source line; kernel name resolved per dispatch.
+
+    vecCopy (kernel_id 100) and vecAdd (kernel_id 101) share code object 5,
+    so each sample's kernel must be resolved via its dispatch_id, not the
+    shared code_object_id.
+    """
     samples = [
-        _make_record(100, 0x10, 0, dispatch_id=0),
-        _make_record(100, 0x20, 1, dispatch_id=0),
-        _make_record(100, 0x10, 0, dispatch_id=1),
+        make_record(5, 0x10, 0, dispatch_id=0),
+        make_record(5, 0x10, 0, dispatch_id=0),
+        make_record(5, 0x20, 1, dispatch_id=1),
     ]
-    _write_json(
+    write_results_json(
         tmp_path / "ps_file_results.json",
         instructions=["v_mov_b32 v0 v1", "s_waitcnt vmcnt(0)"],
-        comments=["/src/vcopy.cpp:42", "/src/vcopy.cpp:43"],
-        kernel_symbols=[_make_kernel_symbol(100, 100, "vecCopy")],
+        comments=["/src/vcopy.cpp:42", "/src/vadd.cpp:99"],
+        kernel_symbols=[
+            make_kernel_symbol(100, 5, "vecCopy"),
+            make_kernel_symbol(101, 5, "vecAdd"),
+        ],
+        kernel_dispatch=[make_dispatch(0, 100), make_dispatch(1, 101)],
         **{method: samples},
     )
     workload = schema.Workload()
@@ -757,9 +748,12 @@ def test_load_pc_sampling_data_no_filter(
         "instruction",
         "count",
     ]
+    by_kernel = dict(zip(df["source_line"], df["Kernel_Name"]))
     assert df.iloc[0]["source_line"].startswith("...")
     assert df.iloc[0]["count"] == 2
-    assert df.iloc[0]["Kernel_Name"] == "vecCopy"
+    # Samples sharing code object 5 still resolve to their own kernels.
+    assert by_kernel[".../vcopy.cpp:42"] == "vecCopy"
+    assert by_kernel[".../vadd.cpp:99"] == "vecAdd"
 
 
 def test_load_pc_sampling_data_multiple_kernels_error(
@@ -769,9 +763,9 @@ def test_load_pc_sampling_data_multiple_kernels_error(
     Return an empty DataFrame and log an error when more
     than one kernel ID is filtered.
     """
-    _write_json(
+    write_results_json(
         tmp_path / "ps_file_results.json",
-        stochastic=[_make_record(100, 0x10, 0, dispatch_id=0)],
+        stochastic=[make_record(100, 0x10, 0, dispatch_id=0)],
     )
     workload = schema.Workload(filter_kernel_ids=[0, 1])
     with patch("utils.parser.console_error"):
@@ -788,13 +782,13 @@ def test_load_pc_sampling_data_single_kernel_valid(
     tmp_path: Path,
 ) -> None:
     """Return per-kernel data when exactly one valid kernel ID is filtered."""
-    _write_json(
+    write_results_json(
         tmp_path / "ps_file_results.json",
-        stochastic=[_make_record(100, 0x10, 0, dispatch_id=0)],
+        stochastic=[make_record(100, 0x10, 0, dispatch_id=0)],
         instructions=["v_mov_b32"],
         comments=["/src/vcopy.cpp:42"],
-        kernel_symbols=[_make_kernel_symbol(100, 100, "vecCopy")],
-        kernel_dispatch=[_make_dispatch(0, 100)],
+        kernel_symbols=[make_kernel_symbol(100, 100, "vecCopy")],
+        kernel_dispatch=[make_dispatch(0, 100)],
     )
     kernel_top_df = pd.DataFrame({"Kernel_Name": ["vecCopy"]})
     workload = schema.Workload(
@@ -812,11 +806,11 @@ def test_load_pc_sampling_data_single_kernel_out_of_bounds(
     Return an empty DataFrame when the filtered kernel ID
     exceeds the kernel-top table range.
     """
-    _write_json(
+    write_results_json(
         tmp_path / "ps_file_results.json",
-        stochastic=[_make_record(100, 0x10, 0, dispatch_id=0)],
-        kernel_symbols=[_make_kernel_symbol(100, 100, "vecCopy")],
-        kernel_dispatch=[_make_dispatch(0, 100)],
+        stochastic=[make_record(100, 0x10, 0, dispatch_id=0)],
+        kernel_symbols=[make_kernel_symbol(100, 100, "vecCopy")],
+        kernel_dispatch=[make_dispatch(0, 100)],
     )
     kernel_top_df = pd.DataFrame({"Kernel_Name": ["vecCopy", "vecAdd"]})
     workload = schema.Workload(
@@ -834,10 +828,10 @@ def test_load_pc_sampling_data_method_not_detected(
     Return an empty DataFrame for a single-kernel filter when neither
     pc_sample array is populated (no detectable method).
     """
-    _write_json(
+    write_results_json(
         tmp_path / "ps_file_results.json",
-        kernel_symbols=[_make_kernel_symbol(100, 100, "vecCopy")],
-        kernel_dispatch=[_make_dispatch(0, 100)],
+        kernel_symbols=[make_kernel_symbol(100, 100, "vecCopy")],
+        kernel_dispatch=[make_dispatch(0, 100)],
     )
     kernel_top_df = pd.DataFrame({"Kernel_Name": ["vecCopy"]})
     workload = schema.Workload(
@@ -846,6 +840,59 @@ def test_load_pc_sampling_data_method_not_detected(
     )
     df = load_pc_sampling_data(workload, str(tmp_path), "ps_file", "count")
     assert df.empty
+
+
+@pytest.mark.parametrize(
+    "populated, expected_column_count",
+    [
+        ("host_trap", 5),  # host_trap-only is detected
+        ("both", 8),  # stochastic wins when both arrays are populated
+    ],
+)
+def test_load_pc_sampling_data_method_detection(
+    tmp_path: Path,
+    populated: str,
+    expected_column_count: int,
+) -> None:
+    """Single-kernel method detection: host_trap-only and stochastic-priority."""
+    host_trap = [make_record(5, 0x10, 0, dispatch_id=0)]
+    kwargs = {"host_trap": host_trap}
+    if populated == "both":
+        kwargs["stochastic"] = [make_record(5, 0x10, 0, dispatch_id=0)]
+    write_results_json(
+        tmp_path / "ps_file_results.json",
+        instructions=["v_mov"],
+        comments=["/s/a.cpp:1"],
+        kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
+        kernel_dispatch=[make_dispatch(0, 100)],
+        **kwargs,
+    )
+    kernel_top_df = pd.DataFrame({"Kernel_Name": ["vecCopy"]})
+    workload = schema.Workload(
+        filter_kernel_ids=[0],
+        dfs={PMC_KERNEL_TOP_TABLE_ID: kernel_top_df},
+    )
+    df = load_pc_sampling_data(workload, str(tmp_path), "ps_file", "count")
+    assert len(df.columns) == expected_column_count
+
+
+def test_load_pc_sampling_data_no_filter_instruction_out_of_range(
+    tmp_path: Path,
+) -> None:
+    """No-filter: an inst_index past the instruction table yields a None entry."""
+    write_results_json(
+        tmp_path / "ps_file_results.json",
+        stochastic=[make_record(5, 0x10, 1, dispatch_id=0)],
+        instructions=["v_mov"],  # len 1; inst_index 1 is out of range
+        comments=["/s/a.cpp:1", "/s/a.cpp:2"],  # len 2; inst_index 1 in range
+        kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
+        kernel_dispatch=[make_dispatch(0, 100)],
+    )
+    workload = schema.Workload()
+    df = load_pc_sampling_data(workload, str(tmp_path), "ps_file", "count")
+    assert not df.empty
+    assert df.iloc[0]["instruction"] is None
+    assert df.iloc[0]["source_line"] == ".../a.cpp:2"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -924,24 +971,24 @@ def test_process_pc_sampling_missing_results_returns_empty(
 
 def test_process_pc_sampling_with_agent_info(tmp_path: Path) -> None:
     """Verify column selection, GPU mapping, kernel names, and timestamps."""
-    _write_json(
+    write_results_json(
         tmp_path / "ps_file_results.json",
         kernel_symbols=[
-            _make_kernel_symbol(12, 2, "vecCopy"),
-            _make_kernel_symbol(13, 2, "vecAdd"),
-            _make_kernel_symbol(14, 2, "vecMul"),
+            make_kernel_symbol(12, 2, "vecCopy"),
+            make_kernel_symbol(13, 2, "vecAdd"),
+            make_kernel_symbol(14, 2, "vecMul"),
         ],
         kernel_dispatch=[
-            _make_dispatch(
+            make_dispatch(
                 1, 12, agent_handle=20, start=1981199661678356, end=1981199662835032
             ),
-            _make_dispatch(2, 13, agent_handle=30, start=2000, end=3000),
-            _make_dispatch(3, 14, agent_handle=99, start=4000, end=5000),
+            make_dispatch(2, 13, agent_handle=30, start=2000, end=3000),
+            make_dispatch(3, 14, agent_handle=99, start=4000, end=5000),
         ],
         agents=[
-            _make_agent(handle=10, node_id=1, agent_type=1),
-            _make_agent(handle=20, node_id=2, agent_type=2),
-            _make_agent(handle=30, node_id=3, agent_type=2),
+            make_agent(handle=10, node_id=1, agent_type=1),
+            make_agent(handle=20, node_id=2, agent_type=2),
+            make_agent(handle=30, node_id=3, agent_type=2),
         ],
     )
 
@@ -968,15 +1015,28 @@ def test_process_pc_sampling_with_agent_info(tmp_path: Path) -> None:
 
 def test_process_pc_sampling_no_gpu_agents(tmp_path: Path) -> None:
     """Default GPU_ID to 0 when no GPU agents are present."""
-    _write_json(
+    write_results_json(
         tmp_path / "ps_file_results.json",
-        kernel_symbols=[_make_kernel_symbol(12, 2, "vecCopy")],
-        kernel_dispatch=[_make_dispatch(1, 12, agent_handle=99, start=1000, end=2000)],
-        agents=[_make_agent(handle=10, node_id=1, agent_type=1)],
+        kernel_symbols=[make_kernel_symbol(12, 2, "vecCopy")],
+        kernel_dispatch=[make_dispatch(1, 12, agent_handle=99, start=1000, end=2000)],
+        agents=[make_agent(handle=10, node_id=1, agent_type=1)],
     )
     df = process_pc_sampling_kernel_trace(str(tmp_path))
     assert len(df) == 1
     assert df["GPU_ID"].iloc[0] == 0
+
+
+def test_process_pc_sampling_unmapped_kernel_id(tmp_path: Path) -> None:
+    """A dispatch whose kernel_id is absent from kernel_symbols maps to None."""
+    write_results_json(
+        tmp_path / "ps_file_results.json",
+        kernel_symbols=[make_kernel_symbol(12, 2, "vecCopy")],
+        kernel_dispatch=[make_dispatch(1, 999, agent_handle=20, start=1, end=2)],
+        agents=[make_agent(handle=20, node_id=2, agent_type=2)],
+    )
+    df = process_pc_sampling_kernel_trace(str(tmp_path))
+    assert len(df) == 1
+    assert df.iloc[0]["Kernel_Name"] is None
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -987,8 +1047,8 @@ def test_process_pc_sampling_no_gpu_agents(tmp_path: Path) -> None:
 def test_build_agent_to_gpu_map_single_gpu() -> None:
     """Map one GPU agent to GPU index 0, ignoring CPU agents."""
     agents = [
-        _make_agent(handle=10, node_id=1, agent_type=1),
-        _make_agent(handle=20, node_id=2, agent_type=2),
+        make_agent(handle=10, node_id=1, agent_type=1),
+        make_agent(handle=20, node_id=2, agent_type=2),
     ]
     assert build_agent_to_gpu_map_from_json(agents) == {20: 0}
 
@@ -996,9 +1056,9 @@ def test_build_agent_to_gpu_map_single_gpu() -> None:
 def test_build_agent_to_gpu_map_two_gpus() -> None:
     """Assign sequential GPU indices to multiple GPU agents sorted by node_id."""
     agents = [
-        _make_agent(handle=10, node_id=1, agent_type=1),
-        _make_agent(handle=30, node_id=3, agent_type=2),
-        _make_agent(handle=20, node_id=2, agent_type=2),
+        make_agent(handle=10, node_id=1, agent_type=1),
+        make_agent(handle=30, node_id=3, agent_type=2),
+        make_agent(handle=20, node_id=2, agent_type=2),
     ]
     assert build_agent_to_gpu_map_from_json(agents) == {20: 0, 30: 1}
 
@@ -1006,8 +1066,8 @@ def test_build_agent_to_gpu_map_two_gpus() -> None:
 def test_build_agent_to_gpu_map_no_gpu_agents() -> None:
     """Return an empty map when no GPU agents are present."""
     agents = [
-        _make_agent(handle=10, node_id=1, agent_type=1),
-        _make_agent(handle=11, node_id=2, agent_type=1),
+        make_agent(handle=10, node_id=1, agent_type=1),
+        make_agent(handle=11, node_id=2, agent_type=1),
     ]
     assert build_agent_to_gpu_map_from_json(agents) == {}
 
@@ -1043,8 +1103,8 @@ def test_calc_pc_sampling_data_aggregation(
     placement: str,
 ) -> None:
     """Records group by (code_object_id, offset) with the documented schema."""
-    s0 = _make_record(100, 0x10, 0, dispatch_id=0, wave_issued=True)
-    s1 = _make_record(
+    s0 = make_record(100, 0x10, 0, dispatch_id=0, wave_issued=True)
+    s1 = make_record(
         100,
         0x10,
         0,
@@ -1052,14 +1112,14 @@ def test_calc_pc_sampling_data_aggregation(
         wave_issued=False,
         stall_reason=f"{PREFIX}WAITCNT",
     )
-    s2 = _make_record(101, 0x20, 1, dispatch_id=2, wave_issued=True)
+    s2 = make_record(101, 0x20, 1, dispatch_id=2, wave_issued=True)
     if placement == "stochastic":
         kwargs = {"stochastic": [s0, s1, s2]}
     elif placement == "host_trap":
         kwargs = {"host_trap": [s0, s1, s2]}
     else:
         kwargs = {"stochastic": [s0, s1], "host_trap": [s2]}
-    _write_json(
+    write_results_json(
         tmp_path / "ps_file_results.json",
         instructions=["v_mov", "v_add"],
         comments=["/s/a.cpp:1", "/s/a.cpp:2"],
@@ -1098,9 +1158,9 @@ def test_calc_pc_sampling_data_unmapped_kernel(
     tmp_path: Path,
 ) -> None:
     """A code_object_id absent from kernel_symbols maps to a None kernel_name."""
-    _write_json(
+    write_results_json(
         tmp_path / "ps_file_results.json",
-        stochastic=[_make_record(999, 0x10, 0, dispatch_id=0, wave_issued=True)],
+        stochastic=[make_record(999, 0x10, 0, dispatch_id=0, wave_issued=True)],
         instructions=["v_mov"],
         comments=["/s/a.cpp:1"],
         kernel_symbols=[{"code_object_id": 100, "formatted_kernel_name": "vecCopy"}],

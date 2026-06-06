@@ -36,8 +36,6 @@ For using profiling options for PC sampling the configuration needed are:
 
    $ rocprof-compute profile -n pc_test --no-roof --experimental --pc-sampling --pc-sampling-method stochastic --pc-sampling-interval 1048576 -VVV -- target_app
 
-PC sampling profiling now emits only ``ps_file_results.json`` in the workload directory; the per-sample, kernel-trace, and agent-info ``ps_file_*.csv`` artifacts are no longer produced.
-
 Analysis options
 ================
 For using analysis options for PC sampling the configuration needed are:

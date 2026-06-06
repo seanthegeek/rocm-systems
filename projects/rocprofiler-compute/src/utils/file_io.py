@@ -25,9 +25,6 @@ from utils.utils_common import canonical_config_arch, normalize_filter_to_str_li
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd
 
-# rocprofiler-sdk agent record "type" enum value for a GPU agent.
-ROCPROFILER_AGENT_TYPE_GPU = 2
-
 
 def load_panel_configs(
     dirs: list[str],
@@ -213,13 +210,14 @@ def build_agent_to_gpu_map_from_json(
     """
     Map agent ``id.handle`` values to 0-indexed GPU IDs.
 
-    GPU agents are identified by ``type == ROCPROFILER_AGENT_TYPE_GPU``
-    in the ``agents`` array of ``ps_file_results.json``.  They are
+    GPU agents are identified by the rocprofiler-sdk agent ``type`` enum
+    value 2 in the ``agents`` array of ``ps_file_results.json``.  They are
     sorted by ``node_id`` so that the first GPU agent maps to GPU 0,
     the second to GPU 1, etc.
     """
+    rocprofiler_agent_type_gpu = 2
     gpu_agents = sorted(
-        (agent for agent in agents if agent.get("type") == ROCPROFILER_AGENT_TYPE_GPU),
+        (agent for agent in agents if agent.get("type") == rocprofiler_agent_type_gpu),
         key=lambda agent: agent["node_id"],
     )
     return {agent["id"]["handle"]: index for index, agent in enumerate(gpu_agents)}
