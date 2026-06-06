@@ -794,6 +794,9 @@ def _load_pc_sampling_no_filter_data(tool_data: dict[str, Any]) -> pd.DataFrame:
         for dispatch in buffer_records["kernel_dispatch"]
     }
 
+    # Correlate each sample to its kernel through the dispatch it belongs to:
+    # record.dispatch_id -> kernel_id -> formatted name. code_object_id is not
+    # usable here because one code object can hold several kernels.
     rows = [
         {
             "source_line": (
@@ -813,6 +816,9 @@ def _load_pc_sampling_no_filter_data(tool_data: dict[str, Any]) -> pd.DataFrame:
         for sample in samples
     ]
 
+    # Aggregate per source line: count is the number of samples on that line.
+    # instruction and Kernel_Name take a representative (first) value, since one
+    # source line can map to several instructions.
     df = pd.DataFrame(rows, columns=["source_line", "instruction", "Kernel_Name"])
     grouped_counts = (
         df
