@@ -693,26 +693,33 @@ def load_pc_sampling_data_per_kernel(
 
 @demarcate
 def load_pc_sampling_data(
-    workload: schema.Workload, dir_path: str, file_prefix: str, sorting_type: str
+    workload: schema.Workload,
+    dir_path: str,
+    file_prefix: str,
+    sorting_type: str,
+    tool_data: Optional[dict[str, Any]] = None,
 ) -> pd.DataFrame:
     """
     Load PC sampling raw data, filter and sort it by specified conditions,
     then return df.
+
+    *tool_data* is a parsed ``rocprofiler-sdk-tool[0]`` dict. When omitted
+    the (potentially multi-GB) results json is parsed from *dir_path*;
+    callers that already hold the parsed data should pass it to avoid
+    re-reading the file.
     """
 
     if not file_prefix or file_prefix.lower() == "none":
         return pd.DataFrame()
 
-    json_file_path = Path(dir_path) / f"{file_prefix}_results.json"
-    if not json_file_path.exists():
-        console_warning(f"PC sampling: can not read {json_file_path}")
-        return pd.DataFrame()
-
-    # Parse the (potentially large) results json once and reuse it for all
-    # downstream lookups; it is released when this function returns.
-    tool_data = json.loads(json_file_path.read_text(encoding="utf-8"))[
-        "rocprofiler-sdk-tool"
-    ][0]
+    if tool_data is None:
+        json_file_path = Path(dir_path) / f"{file_prefix}_results.json"
+        if not json_file_path.exists():
+            console_warning(f"PC sampling: can not read {json_file_path}")
+            return pd.DataFrame()
+        tool_data = json.loads(json_file_path.read_text(encoding="utf-8"))[
+            "rocprofiler-sdk-tool"
+        ][0]
 
     # No kernel filter: aggregate samples across all kernels by source line.
     if not workload.filter_kernel_ids:
@@ -852,7 +859,10 @@ def nullify_unevaluated_metric_values(
 
 @demarcate
 def load_non_mertrics_table(
-    workload: schema.Workload, dir_path: str, args: argparse.Namespace
+    workload: schema.Workload,
+    dir_path: str,
+    args: argparse.Namespace,
+    pc_sampling_tool_data: Optional[dict[str, Any]] = None,
 ) -> None:
     # NB:
     #   - Do pmc_kernel_top.csv loading before eval_metric because we need the
@@ -902,6 +912,7 @@ def load_non_mertrics_table(
                 dir_path,
                 df.loc[0, "from_pc_sampling"],
                 args.pc_sampling_sorting_type,
+                tool_data=pc_sampling_tool_data,
             )
 
     workload.dfs.update(tmp)

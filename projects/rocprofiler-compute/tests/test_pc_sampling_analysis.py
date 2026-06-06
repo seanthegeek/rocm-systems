@@ -14,6 +14,7 @@ from rocprof_compute_analyze.analysis_db import db_analysis
 from utils import schema
 from utils.file_io import (
     build_agent_to_gpu_map_from_json,
+    load_pc_sampling_results,
     process_pc_sampling_kernel_trace,
 )
 from utils.parser import (
@@ -954,11 +955,25 @@ def test_nullify_unevaluated_metrics_empty_df_skipped() -> None:
 # ═══════════════════════════════════════════════════════════════
 
 
-def test_process_pc_sampling_missing_results_returns_empty(
-    tmp_path: Path,
-) -> None:
-    """Return empty DataFrame with expected columns when results json is absent."""
-    df = process_pc_sampling_kernel_trace(str(tmp_path))
+def test_load_pc_sampling_results_missing_returns_none(tmp_path: Path) -> None:
+    """Return None when the results json is absent."""
+    assert load_pc_sampling_results(str(tmp_path)) is None
+
+
+def test_load_pc_sampling_results_parses_tool_record(tmp_path: Path) -> None:
+    """Return the rocprofiler-sdk-tool[0] dict when the results json exists."""
+    write_results_json(
+        tmp_path / "ps_file_results.json",
+        kernel_symbols=[make_kernel_symbol(12, 2, "vecCopy")],
+    )
+    tool_data = load_pc_sampling_results(str(tmp_path))
+    assert tool_data is not None
+    assert tool_data["kernel_symbols"][0]["formatted_kernel_name"] == "vecCopy"
+
+
+def test_process_pc_sampling_none_returns_empty() -> None:
+    """Return empty DataFrame with expected columns when tool_data is None."""
+    df = process_pc_sampling_kernel_trace(None)
     assert df.empty
     assert list(df.columns) == [
         "Dispatch_Id",
@@ -969,10 +984,9 @@ def test_process_pc_sampling_missing_results_returns_empty(
     ]
 
 
-def test_process_pc_sampling_with_agent_info(tmp_path: Path) -> None:
+def test_process_pc_sampling_with_agent_info() -> None:
     """Verify column selection, GPU mapping, kernel names, and timestamps."""
-    write_results_json(
-        tmp_path / "ps_file_results.json",
+    tool_data = make_tool_data(
         kernel_symbols=[
             make_kernel_symbol(12, 2, "vecCopy"),
             make_kernel_symbol(13, 2, "vecAdd"),
@@ -992,7 +1006,7 @@ def test_process_pc_sampling_with_agent_info(tmp_path: Path) -> None:
         ],
     )
 
-    df = process_pc_sampling_kernel_trace(str(tmp_path))
+    df = process_pc_sampling_kernel_trace(tool_data)
 
     # Correct shape and columns
     assert len(df) == 3
@@ -1013,28 +1027,26 @@ def test_process_pc_sampling_with_agent_info(tmp_path: Path) -> None:
     assert df["End_Timestamp"].iloc[0] == 1981199662835032
 
 
-def test_process_pc_sampling_no_gpu_agents(tmp_path: Path) -> None:
+def test_process_pc_sampling_no_gpu_agents() -> None:
     """Default GPU_ID to 0 when no GPU agents are present."""
-    write_results_json(
-        tmp_path / "ps_file_results.json",
+    tool_data = make_tool_data(
         kernel_symbols=[make_kernel_symbol(12, 2, "vecCopy")],
         kernel_dispatch=[make_dispatch(1, 12, agent_handle=99, start=1000, end=2000)],
         agents=[make_agent(handle=10, node_id=1, agent_type=1)],
     )
-    df = process_pc_sampling_kernel_trace(str(tmp_path))
+    df = process_pc_sampling_kernel_trace(tool_data)
     assert len(df) == 1
     assert df["GPU_ID"].iloc[0] == 0
 
 
-def test_process_pc_sampling_unmapped_kernel_id(tmp_path: Path) -> None:
+def test_process_pc_sampling_unmapped_kernel_id() -> None:
     """A dispatch whose kernel_id is absent from kernel_symbols maps to None."""
-    write_results_json(
-        tmp_path / "ps_file_results.json",
+    tool_data = make_tool_data(
         kernel_symbols=[make_kernel_symbol(12, 2, "vecCopy")],
         kernel_dispatch=[make_dispatch(1, 999, agent_handle=20, start=1, end=2)],
         agents=[make_agent(handle=20, node_id=2, agent_type=2)],
     )
-    df = process_pc_sampling_kernel_trace(str(tmp_path))
+    df = process_pc_sampling_kernel_trace(tool_data)
     assert len(df) == 1
     assert df.iloc[0]["Kernel_Name"] is None
 

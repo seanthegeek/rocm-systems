@@ -224,16 +224,33 @@ def build_agent_to_gpu_map_from_json(
 
 
 @demarcate
+def load_pc_sampling_results(workload_path: str) -> Optional[dict[str, Any]]:
+    """
+    Parse ``ps_file_results.json`` and return its ``rocprofiler-sdk-tool[0]``
+    record, or ``None`` if the file is absent.
+
+    The results json can be multiple GB, so callers should parse once and
+    pass the returned dict to the PC sampling consumers rather than
+    re-reading the file.
+    """
+    json_path = Path(workload_path) / "ps_file_results.json"
+    if not json_path.exists():
+        return None
+    return json.loads(json_path.read_text(encoding="utf-8"))["rocprofiler-sdk-tool"][0]
+
+
 def process_pc_sampling_kernel_trace(
-    workload_path: str,
+    tool_data: Optional[dict[str, Any]],
 ) -> pd.DataFrame:
     """
     Build kernel and dispatch info from the kernel dispatch records.
 
     Used for PC-sampling-only runs where ``pmc_perf`` data is not
-    available.  Reads ``ps_file_results.json``: kernel dispatch buffer
-    records for timestamps and dispatch info, ``kernel_symbols`` for
-    kernel names, and ``agents`` for the GPU ID mapping.
+    available.  Consumes a parsed ``rocprofiler-sdk-tool[0]`` dict
+    (see ``load_pc_sampling_results``): kernel dispatch buffer records for
+    timestamps and dispatch info, ``kernel_symbols`` for kernel names, and
+    ``agents`` for the GPU ID mapping.  Returns an empty frame when
+    *tool_data* is ``None`` (results json absent).
     """
     columns = [
         "Dispatch_Id",
@@ -242,16 +259,10 @@ def process_pc_sampling_kernel_trace(
         "End_Timestamp",
         "GPU_ID",
     ]
-    json_path = Path(workload_path) / "ps_file_results.json"
-    if not json_path.exists():
-        console_warning(
-            f"PC sampling results not found at {json_path}. Cannot build dispatch data."
-        )
+    if tool_data is None:
+        console_warning("PC sampling results not found. Cannot build dispatch data.")
         return pd.DataFrame(columns=columns)
 
-    tool_data = json.loads(json_path.read_text(encoding="utf-8"))[
-        "rocprofiler-sdk-tool"
-    ][0]
     dispatches = tool_data["buffer_records"]["kernel_dispatch"]
     kernel_id_to_name = {
         symbol["kernel_id"]: symbol["formatted_kernel_name"]
