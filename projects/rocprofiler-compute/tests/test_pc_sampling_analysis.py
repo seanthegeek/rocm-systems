@@ -896,6 +896,28 @@ def test_load_pc_sampling_data_no_filter_instruction_out_of_range(
     assert df.iloc[0]["source_line"] == ".../a.cpp:2"
 
 
+def test_load_pc_sampling_data_uses_provided_tool_data(tmp_path: Path) -> None:
+    """When tool_data is passed, use it without reading the results json.
+
+    No ps_file_results.json is written, so a non-empty result proves the
+    provided dict was used (the file-parse fallback would warn and return
+    empty).
+    """
+    tool_data = make_tool_data(
+        stochastic=[make_record(5, 0x10, 0, dispatch_id=0)],
+        instructions=["v_mov"],
+        comments=["/s/a.cpp:1"],
+        kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
+        kernel_dispatch=[make_dispatch(0, 100)],
+    )
+    workload = schema.Workload()  # no kernel filter -> no-filter path
+    df = load_pc_sampling_data(
+        workload, str(tmp_path), "ps_file", "count", tool_data=tool_data
+    )
+    assert not df.empty
+    assert df.iloc[0]["Kernel_Name"] == "vecCopy"
+
+
 # ═══════════════════════════════════════════════════════════════
 # nullify_unevaluated_metric_values
 # ═══════════════════════════════════════════════════════════════
@@ -1180,6 +1202,44 @@ def test_calc_pc_sampling_data_unmapped_kernel(
     instance = make_db_analysis(str(tmp_path))
     df = instance.calc_pc_sampling_data()[str(tmp_path)]
     assert df.iloc[0]["kernel_name"] is None
+
+
+def test_calc_pc_sampling_data_uses_provided_tool_data(tmp_path: Path) -> None:
+    """calc uses the provided tool_data map without reading the results json."""
+    tool_data = make_tool_data(
+        stochastic=[make_record(5, 0x10, 0, dispatch_id=0, wave_issued=True)],
+        instructions=["v_mov"],
+        comments=["/s/a.cpp:1"],
+        kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
+    )
+    instance = make_db_analysis(str(tmp_path))
+    # No ps_file_results.json on disk: a populated result proves the map was used.
+    result = instance.calc_pc_sampling_data({str(tmp_path): tool_data})
+    assert str(tmp_path) in result
+    assert not result[str(tmp_path)].empty
+    assert result[str(tmp_path)].iloc[0]["kernel_name"] == "vecCopy"
+
+
+def test_calc_dispatch_data_uses_provided_tool_data(tmp_path: Path) -> None:
+    """calc_dispatch_data builds PC-sampling dispatch rows from the provided map."""
+    tool_data = make_tool_data(
+        kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
+        kernel_dispatch=[make_dispatch(0, 100, agent_handle=20, start=10, end=20)],
+        agents=[make_agent(handle=20, node_id=2, agent_type=2)],
+    )
+    instance = make_db_analysis(str(tmp_path))
+    instance._profiling_config = {"filter_blocks": ["21"]}  # pc_sampling_only -> True
+    result = instance.calc_dispatch_data({str(tmp_path): tool_data})
+    df = result[str(tmp_path)]
+    assert list(df.columns) == [
+        "dispatch_id",
+        "kernel_name",
+        "gpu_id",
+        "start_timestamp",
+        "end_timestamp",
+    ]
+    assert df.iloc[0]["kernel_name"] == "vecCopy"
+    assert df.iloc[0]["gpu_id"] == 0
 
 
 # ═══════════════════════════════════════════════════════════════
