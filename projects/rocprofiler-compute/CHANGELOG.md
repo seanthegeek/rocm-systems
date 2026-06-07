@@ -56,6 +56,12 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * PC sampling profiling now emits only `ps_file_results.json`. The per-sample, kernel-trace, and agent-info CSV artifacts are no longer produced or consumed by analysis.
 
+* Bugfix: PC sampling database output now attributes each instruction to the correct kernel. Previously kernels sharing a code object were all labeled with one name.
+
+* PC sampling analysis without `-k` now shows the full per-instruction table across all kernels (with a `Kernel_Name` column), identical in schema to the single-kernel view, instead of a collapsed source-line summary.
+
+* PC sampling tables now display for workloads built without source-line debug info. Missing source lines show as `N/A` instead of suppressing the table.
+
 ### Removed
 
 * ``--path`` and ``--subpath`` options have been removed from profile mode. Use ``--output-directory`` instead.

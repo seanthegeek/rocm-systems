@@ -1338,7 +1338,8 @@ def test_pc_sampling_basic_coverage():
 
     import tempfile
 
-    from utils.parser import load_pc_sampling_data, search_pc_sampling_record
+    from utils.parser import load_pc_sampling_data
+    from utils.pc_sampling_analysis import load_pc_sample_records
 
     class MockWorkload:
         filter_kernel_ids = []
@@ -1356,8 +1357,14 @@ def test_pc_sampling_basic_coverage():
         result = load_pc_sampling_data(workload, temp_dir, "test", "count")
         assert result.empty
 
-        result = search_pc_sampling_record([])
-        assert result is None
+        empty_records = load_pc_sample_records({
+            "buffer_records": {
+                "pc_sample_stochastic": [],
+                "pc_sample_host_trap": [],
+                "kernel_dispatch": [],
+            },
+        })
+        assert empty_records.empty
 
 
 @pytest.mark.division_by_zero
