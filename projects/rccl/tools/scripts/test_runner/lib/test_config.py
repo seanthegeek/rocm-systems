@@ -430,6 +430,16 @@ class TestConfigProcessor:
         """
         return self.config.get("build_configuration", {})
 
+    def get_rccl_tests_build_config(self):
+        """
+        Get the rccl-tests build configuration settings.
+
+        Returns:
+            dict: rccl-tests build configuration (source_dir, install_flags,
+                  parallel_jobs, env_variables, etc.). Empty dict if not present.
+        """
+        return self.config.get("rccl_tests_build_configuration", {})
+
     def validate_config(self):
         """
         Validate the configuration for required fields.
