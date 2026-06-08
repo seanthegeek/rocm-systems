@@ -51,6 +51,9 @@ from utils.utils_common import (
 from utils.utils_exceptions import WorkloadCommandError
 from utils.utils_profile import get_submodules
 
+PC_SAMPLING_INTERVAL_DEFAULTS = {"stochastic": 1048576, "host_trap": 512}
+PC_SAMPLING_STOCHASTIC_MIN_INTERVAL = 65536
+
 
 class RocProfCompute:
     def __init__(self) -> None:
@@ -628,6 +631,40 @@ class RocProfCompute:
 
         if getattr(args, "bench_only", False) and getattr(args, "no_roof", False):
             console_error("--bench-only cannot be used with --no-roof.")
+
+        self._resolve_pc_sampling_interval()
+
+    def _resolve_pc_sampling_interval(self) -> None:
+        """Apply the method-aware default for --pc-sampling-interval and
+        validate a user-supplied stochastic interval.
+
+        stochastic intervals are in cycles and must be a power of two no
+        smaller than 65536; host_trap intervals are in microseconds and may
+        be any positive integer.
+        """
+        args = self.__args
+        if not getattr(args, "pc_sampling", False):
+            return
+
+        method = args.pc_sampling_method
+        if args.pc_sampling_interval is None:
+            args.pc_sampling_interval = PC_SAMPLING_INTERVAL_DEFAULTS[method]
+            return
+
+        interval = args.pc_sampling_interval
+        if method == "stochastic":
+            is_power_of_two = interval > 0 and interval & (interval - 1) == 0
+            if not is_power_of_two or interval < PC_SAMPLING_STOCHASTIC_MIN_INTERVAL:
+                console_error(
+                    "--pc-sampling-interval for stochastic sampling must be a "
+                    f"power of 2 and at least {PC_SAMPLING_STOCHASTIC_MIN_INTERVAL} "
+                    f"(got {interval})."
+                )
+        elif interval <= 0:
+            console_error(
+                "--pc-sampling-interval for host_trap sampling must be a "
+                f"positive integer (got {interval})."
+            )
 
     def _validate_list_option_exclusions(self) -> None:
         """Validate that list/discovery options aren't combined with --block.

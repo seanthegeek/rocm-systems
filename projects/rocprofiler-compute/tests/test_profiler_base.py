@@ -297,6 +297,8 @@ def _make_rpc_args(
     filter_blocks=None,
     filter_metrics=None,
     pc_sampling=False,
+    pc_sampling_method="stochastic",
+    pc_sampling_interval=None,
     membw_analysis=False,
     experimental=False,
     mode="profile",
@@ -312,6 +314,8 @@ def _make_rpc_args(
         filter_blocks=filter_blocks,
         filter_metrics=filter_metrics,
         pc_sampling=pc_sampling,
+        pc_sampling_method=pc_sampling_method,
+        pc_sampling_interval=pc_sampling_interval,
         membw_analysis=membw_analysis,
         experimental=experimental,
         set_selected=None,
@@ -397,3 +401,34 @@ def test_sanitize_block_experimental_gating(args, expect_error, expected_filter_
     else:
         instance.sanitize()
         assert args.filter_blocks == expected_filter_blocks
+
+
+@pytest.mark.parametrize(
+    "method, interval, expect_error, expected_interval",
+    [
+        pytest.param("host_trap", None, False, 512, id="host_trap_unset_default"),
+        pytest.param("stochastic", None, False, 1048576, id="stochastic_unset_default"),
+        pytest.param("stochastic", 65536, False, 65536, id="stochastic_min_accepted"),
+        pytest.param("stochastic", 12345, True, None, id="stochastic_not_pow2"),
+        pytest.param("stochastic", 32768, True, None, id="stochastic_below_min"),
+        pytest.param("host_trap", 100, False, 100, id="host_trap_positive_accepted"),
+    ],
+)
+def test_sanitize_pc_sampling_interval(
+    method, interval, expect_error, expected_interval
+):
+    """Unit test: --pc-sampling-interval default and stochastic validation."""
+    args = _make_rpc_args(
+        pc_sampling=True,
+        experimental=True,
+        filter_blocks=[],
+        pc_sampling_method=method,
+        pc_sampling_interval=interval,
+    )
+    instance = _make_rpc_with_args(args)
+    if expect_error:
+        with pytest.raises(SystemExit):
+            instance.sanitize()
+    else:
+        instance.sanitize()
+        assert args.pc_sampling_interval == expected_interval

@@ -99,8 +99,6 @@ def test_pc_sampling_stochastic(binary_handler_profile_rocprof_compute):
         "21",
         "--pc-sampling-method",
         "stochastic",
-        "--pc-sampling-interval",
-        "1048576",
     ]
 
     workload_dir = common.get_output_dir()
@@ -145,8 +143,6 @@ def test_multi_rank_pc_sampling_only(
         "21",
         "--pc-sampling-method",
         "host_trap",
-        "--pc-sampling-interval",
-        "256",
     ]
 
     _, stdout, stderr = binary_handler_profile_rocprof_compute(
@@ -232,8 +228,6 @@ def test_pc_sampling_profile_then_analyze(
         "21",
         "--pc-sampling-method",
         "host_trap",
-        "--pc-sampling-interval",
-        "256",
     ]
 
     workload_dir = common.get_output_dir()
