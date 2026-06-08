@@ -46,19 +46,18 @@ For using analysis options for PC sampling the configuration needed are:
 
 .. code-block:: shell
 
-   $ rocprof-compute analyze -p workloads/pc_test/MI300A_A1/ -k 0 --pc-sampling-sorting-type offset
+   $ rocprof-compute analyze -p <workload_dir> -k 0 --pc-sampling-sorting-type offset
 
 **Sample output:**
 
-The tables below are abbreviated to a few rows; ``source_line`` shows
-``N/A`` because the example binary was built without ``-g`` (see the note
-at the end of this page).
+``source_line`` shows ``N/A`` because the example binary was built without
+``-g`` (see the note at the end of this page).
 
 Selecting a single kernel with ``host_trap`` PC sampling:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p workloads/pc_test/MI300A_A1/ -k 0
+   $ rocprof-compute analyze -p <workload_dir> -k 0
 
    ╒═════════╤═══════════════╤═════════════════════════════════════════════════════╤══════════════════╤══════════╤═════════╤══════════════════════════════════════╕
    │   index │ source_line   │ instruction                                         │   code_object_id │ offset   │   count │ Kernel_Name                          │
@@ -78,7 +77,7 @@ Selecting a single kernel with ``stochastic`` PC sampling, which adds the
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p workloads/pc_test/MI300A_A1/ -k 0
+   $ rocprof-compute analyze -p <workload_dir> -k 0
 
    ╒═════════╤═══════════════╤═════════════════════════════════════════════════════╤══════════════════╤══════════╤═════════╤════════════════╤═════════════════╤═════════════════════════════════════════════════════════════════════════════════════╤══════════════════════════════════════╕
    │   index │ source_line   │ instruction                                         │   code_object_id │ offset   │   count │   count_issued │   count_stalled │ stall_reason                                                                        │ Kernel_Name                          │
@@ -98,7 +97,7 @@ kernels, with a ``Kernel_Name`` column identifying each row's kernel:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p workloads/pc_test/MI300A_A1/
+   $ rocprof-compute analyze -p <workload_dir>
 
    ╒═════════╤═══════════════╤══════════════════════════════════════════════════════════════════╤══════════════════╤══════════╤═════════╤════════════════╤═════════════════╤════════════════════════════════════════════════════════════════════════════════════════════════════╤══════════════════════════════════════════╕
    │   index │ source_line   │ instruction                                                      │   code_object_id │ offset   │   count │   count_issued │   count_stalled │ stall_reason                                                                                       │ Kernel_Name                              │
@@ -117,7 +116,7 @@ Sorting a single kernel by sample ``count`` instead of ``offset``:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p workloads/pc_test/MI300A_A1/ -k 0 --pc-sampling-sorting-type count
+   $ rocprof-compute analyze -p <workload_dir> -k 0 --pc-sampling-sorting-type count
 
    ╒═════════╤═══════════════╤═════════════════════════════════════════════════════╤══════════════════╤══════════╤═════════╤════════════════╤═════════════════╤═════════════════════════════════════════════════════════════════════════════════════╤══════════════════════════════════════╕
    │   index │ source_line   │ instruction                                         │   code_object_id │ offset   │   count │   count_issued │   count_stalled │ stall_reason                                                                        │ Kernel_Name                          │
@@ -131,12 +130,6 @@ Sorting a single kernel by sample ``count`` instead of ``offset``:
    │     188 │ N/A           │ global_store_dwordx4 v[4:5], v[0:3], off            │                2 │ 0x4204   │   13821 │              0 │           13821 │ [('ARBITER_WIN_EX_STALL', 7300), ('ARBITER_NOT_WIN', 6521)]                         │ matmul_fp32_throughput(float*, float │
    │         │               │                                                     │                  │          │         │                │                 │                                                                                     │ __vector(4)*, int)                   │
    ╘═════════╧═══════════════╧═════════════════════════════════════════════════════╧══════════════════╧══════════╧═════════╧════════════════╧═════════════════╧═════════════════════════════════════════════════════════════════════════════════════╧══════════════════════════════════════╛
-
-Multi-rank limitations
-======================
-
-PC sampling (``--pc-sampling``) may fail to collect data for multi-rank
-applications with MPI communication due to synchronization requirements.
 
 
 .. note::
