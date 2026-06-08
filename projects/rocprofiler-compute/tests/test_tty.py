@@ -1,9 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+"""Unit tests for src/utils/tty.py."""
+
 import argparse
 
-import common  # noqa: F401
 import pandas as pd
 
 from utils.tty import format_table_output

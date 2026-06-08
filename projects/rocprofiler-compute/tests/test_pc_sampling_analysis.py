@@ -778,50 +778,35 @@ def test_load_per_kernel_invalid_sorting_type() -> None:
 # ═══════════════════════════════════════════════════════════════
 
 
-def test_load_pc_sampling_data_empty_prefix(
-    tmp_path: Path,
-) -> None:
+def test_load_pc_sampling_data_empty_prefix() -> None:
     """Return an empty DataFrame when the file prefix is an empty string."""
-    workload = schema.Workload()
-    df = load_pc_sampling_data(workload, str(tmp_path), "", "count")
+    df = load_pc_sampling_data(schema.Workload(), "", "count", make_tool_data())
     assert df.empty
 
 
-def test_load_pc_sampling_data_none_prefix(
-    tmp_path: Path,
-) -> None:
-    """Return an empty DataFrame when the file prefix is the literal string 'none'."""
-    workload = schema.Workload()
-    df = load_pc_sampling_data(workload, str(tmp_path), "none", "count")
+def test_load_pc_sampling_data_none_prefix() -> None:
+    """Return an empty DataFrame when the file prefix is the literal 'none'."""
+    df = load_pc_sampling_data(schema.Workload(), "none", "count", make_tool_data())
     assert df.empty
 
 
-def test_load_pc_sampling_data_missing_results_json(
-    tmp_path: Path,
-) -> None:
-    """Return an empty DataFrame when ps_file_results.json does not exist."""
-    workload = schema.Workload()
-    df = load_pc_sampling_data(workload, str(tmp_path), "ps_file", "count")
+def test_load_pc_sampling_data_no_tool_data() -> None:
+    """Return an empty DataFrame when no parsed tool data is provided."""
+    df = load_pc_sampling_data(schema.Workload(), "ps_file", "count", None)
     assert df.empty
 
 
 @pytest.mark.parametrize("method", ["stochastic", "host_trap"])
-def test_load_pc_sampling_data_no_filter_schema_parity(
-    tmp_path: Path,
-    method: str,
-) -> None:
-    """No-filter has the same columns as the single-kernel view, with more rows.
-
-    vecCopy (kernel_id 100) and vecAdd (kernel_id 101) share code object 5 at
-    distinct offsets, so each row's kernel is resolved via dispatch correlation.
-    """
+def test_load_pc_sampling_data_no_filter_schema_parity(method: str) -> None:
+    """No-filter has the same columns as the single-kernel view, with more rows."""
     samples = [
         make_record(5, 0x10, 0, dispatch_id=0),
         make_record(5, 0x10, 0, dispatch_id=0),
         make_record(5, 0x20, 1, dispatch_id=1),
     ]
-    write_results_json(
-        tmp_path / "ps_file_results.json",
+    # vecCopy (kernel 100) and vecAdd (kernel 101) share code object 5 at distinct
+    # offsets, so each row's kernel resolves via dispatch correlation.
+    tool_data = make_tool_data(
         instructions=["v_mov_b32 v0 v1", "s_waitcnt vmcnt(0)"],
         comments=["/src/vcopy.cpp:42", "/src/vadd.cpp:99"],
         kernel_symbols=[
@@ -832,112 +817,81 @@ def test_load_pc_sampling_data_no_filter_schema_parity(
         **{method: samples},
     )
     kernel_top_df = pd.DataFrame({"Kernel_Name": ["vecCopy", "vecAdd"]})
-    no_filter = load_pc_sampling_data(
-        schema.Workload(), str(tmp_path), "ps_file", "offset"
-    )
+    no_filter = load_pc_sampling_data(schema.Workload(), "ps_file", "offset", tool_data)
     single = load_pc_sampling_data(
         schema.Workload(
             filter_kernel_ids=[0], dfs={PMC_KERNEL_TOP_TABLE_ID: kernel_top_df}
         ),
-        str(tmp_path),
         "ps_file",
         "offset",
+        tool_data,
     )
     assert list(no_filter.columns) == list(single.columns)
     assert "Kernel_Name" in no_filter.columns
-    # No-filter spans both kernels; the single-kernel view is the vecCopy subset.
     assert set(no_filter["Kernel_Name"]) == {"vecCopy", "vecAdd"}
     assert set(single["Kernel_Name"]) == {"vecCopy"}
     assert len(no_filter) > len(single)
-    # Samples sharing code object 5 still resolve to their own kernels.
     by_kernel = dict(zip(no_filter["source_line"], no_filter["Kernel_Name"]))
     assert by_kernel[".../vcopy.cpp:42"] == "vecCopy"
     assert by_kernel[".../vadd.cpp:99"] == "vecAdd"
 
 
-def test_load_pc_sampling_data_multiple_kernels_error(
-    tmp_path: Path,
-) -> None:
-    """
-    Return an empty DataFrame and log an error when more
-    than one kernel ID is filtered.
-    """
-    write_results_json(
-        tmp_path / "ps_file_results.json",
-        stochastic=[make_record(100, 0x10, 0, dispatch_id=0)],
-    )
+def test_load_pc_sampling_data_multiple_kernels_error() -> None:
+    """Return an empty DataFrame and log an error when >1 kernel ID is filtered."""
+    tool_data = make_tool_data(stochastic=[make_record(100, 0x10, 0, dispatch_id=0)])
     workload = schema.Workload(filter_kernel_ids=[0, 1])
     with patch("utils.parser.console_error"):
-        df = load_pc_sampling_data(
-            workload,
-            str(tmp_path),
-            "ps_file",
-            "count",
-        )
+        df = load_pc_sampling_data(workload, "ps_file", "count", tool_data)
     assert df.empty
 
 
-def test_load_pc_sampling_data_single_kernel_valid(
-    tmp_path: Path,
-) -> None:
+def test_load_pc_sampling_data_single_kernel_valid() -> None:
     """Return per-kernel data when exactly one valid kernel ID is filtered."""
-    write_results_json(
-        tmp_path / "ps_file_results.json",
+    tool_data = make_tool_data(
         stochastic=[make_record(100, 0x10, 0, dispatch_id=0)],
         instructions=["v_mov_b32"],
         comments=["/src/vcopy.cpp:42"],
         kernel_symbols=[make_kernel_symbol(100, 100, "vecCopy")],
         kernel_dispatch=[make_dispatch(0, 100)],
     )
-    kernel_top_df = pd.DataFrame({"Kernel_Name": ["vecCopy"]})
     workload = schema.Workload(
         filter_kernel_ids=[0],
-        dfs={PMC_KERNEL_TOP_TABLE_ID: kernel_top_df},
+        dfs={PMC_KERNEL_TOP_TABLE_ID: pd.DataFrame({"Kernel_Name": ["vecCopy"]})},
     )
-    df = load_pc_sampling_data(workload, str(tmp_path), "ps_file", "count")
+    df = load_pc_sampling_data(workload, "ps_file", "count", tool_data)
     assert not df.empty
 
 
-def test_load_pc_sampling_data_single_kernel_out_of_bounds(
-    tmp_path: Path,
-) -> None:
-    """
-    Return an empty DataFrame when the filtered kernel ID
-    exceeds the kernel-top table range.
-    """
-    write_results_json(
-        tmp_path / "ps_file_results.json",
+def test_load_pc_sampling_data_single_kernel_out_of_bounds() -> None:
+    """Return an empty DataFrame when the filtered kernel ID exceeds kernel-top."""
+    tool_data = make_tool_data(
         stochastic=[make_record(100, 0x10, 0, dispatch_id=0)],
         kernel_symbols=[make_kernel_symbol(100, 100, "vecCopy")],
         kernel_dispatch=[make_dispatch(0, 100)],
     )
-    kernel_top_df = pd.DataFrame({"Kernel_Name": ["vecCopy", "vecAdd"]})
     workload = schema.Workload(
         filter_kernel_ids=[99],
-        dfs={PMC_KERNEL_TOP_TABLE_ID: kernel_top_df},
+        dfs={
+            PMC_KERNEL_TOP_TABLE_ID: pd.DataFrame({
+                "Kernel_Name": ["vecCopy", "vecAdd"]
+            })
+        },
     )
-    df = load_pc_sampling_data(workload, str(tmp_path), "ps_file", "count")
+    df = load_pc_sampling_data(workload, "ps_file", "count", tool_data)
     assert df.empty
 
 
-def test_load_pc_sampling_data_method_not_detected(
-    tmp_path: Path,
-) -> None:
-    """
-    Return an empty DataFrame for a single-kernel filter when neither
-    pc_sample array is populated (no detectable method).
-    """
-    write_results_json(
-        tmp_path / "ps_file_results.json",
+def test_load_pc_sampling_data_method_not_detected() -> None:
+    """Return an empty DataFrame when neither pc_sample array is populated."""
+    tool_data = make_tool_data(
         kernel_symbols=[make_kernel_symbol(100, 100, "vecCopy")],
         kernel_dispatch=[make_dispatch(0, 100)],
     )
-    kernel_top_df = pd.DataFrame({"Kernel_Name": ["vecCopy"]})
     workload = schema.Workload(
         filter_kernel_ids=[0],
-        dfs={PMC_KERNEL_TOP_TABLE_ID: kernel_top_df},
+        dfs={PMC_KERNEL_TOP_TABLE_ID: pd.DataFrame({"Kernel_Name": ["vecCopy"]})},
     )
-    df = load_pc_sampling_data(workload, str(tmp_path), "ps_file", "count")
+    df = load_pc_sampling_data(workload, "ps_file", "count", tool_data)
     assert df.empty
 
 
@@ -949,71 +903,41 @@ def test_load_pc_sampling_data_method_not_detected(
     ],
 )
 def test_load_pc_sampling_data_method_detection(
-    tmp_path: Path,
     populated: str,
     expected_column_count: int,
 ) -> None:
     """Single-kernel method detection: host_trap-only and stochastic-priority."""
-    host_trap = [make_record(5, 0x10, 0, dispatch_id=0)]
-    kwargs = {"host_trap": host_trap}
+    kwargs = {"host_trap": [make_record(5, 0x10, 0, dispatch_id=0)]}
     if populated == "both":
         kwargs["stochastic"] = [make_record(5, 0x10, 0, dispatch_id=0)]
-    write_results_json(
-        tmp_path / "ps_file_results.json",
+    tool_data = make_tool_data(
         instructions=["v_mov"],
         comments=["/s/a.cpp:1"],
         kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
         kernel_dispatch=[make_dispatch(0, 100)],
         **kwargs,
     )
-    kernel_top_df = pd.DataFrame({"Kernel_Name": ["vecCopy"]})
     workload = schema.Workload(
         filter_kernel_ids=[0],
-        dfs={PMC_KERNEL_TOP_TABLE_ID: kernel_top_df},
+        dfs={PMC_KERNEL_TOP_TABLE_ID: pd.DataFrame({"Kernel_Name": ["vecCopy"]})},
     )
-    df = load_pc_sampling_data(workload, str(tmp_path), "ps_file", "count")
+    df = load_pc_sampling_data(workload, "ps_file", "count", tool_data)
     assert len(df.columns) == expected_column_count
 
 
-def test_load_pc_sampling_data_no_filter_instruction_out_of_range(
-    tmp_path: Path,
-) -> None:
+def test_load_pc_sampling_data_no_filter_instruction_out_of_range() -> None:
     """No-filter: an inst_index past the instruction table yields a None entry."""
-    write_results_json(
-        tmp_path / "ps_file_results.json",
+    tool_data = make_tool_data(
         stochastic=[make_record(5, 0x10, 1, dispatch_id=0)],
         instructions=["v_mov"],  # len 1; inst_index 1 is out of range
         comments=["/s/a.cpp:1", "/s/a.cpp:2"],  # len 2; inst_index 1 in range
         kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
         kernel_dispatch=[make_dispatch(0, 100)],
     )
-    workload = schema.Workload()
-    df = load_pc_sampling_data(workload, str(tmp_path), "ps_file", "count")
+    df = load_pc_sampling_data(schema.Workload(), "ps_file", "count", tool_data)
     assert not df.empty
     assert df.iloc[0]["instruction"] is None
     assert df.iloc[0]["source_line"] == ".../a.cpp:2"
-
-
-def test_load_pc_sampling_data_uses_provided_tool_data(tmp_path: Path) -> None:
-    """When tool_data is passed, use it without reading the results json.
-
-    No ps_file_results.json is written, so a non-empty result proves the
-    provided dict was used (the file-parse fallback would warn and return
-    empty).
-    """
-    tool_data = make_tool_data(
-        stochastic=[make_record(5, 0x10, 0, dispatch_id=0)],
-        instructions=["v_mov"],
-        comments=["/s/a.cpp:1"],
-        kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
-        kernel_dispatch=[make_dispatch(0, 100)],
-    )
-    workload = schema.Workload()  # no kernel filter -> no-filter path
-    df = load_pc_sampling_data(
-        workload, str(tmp_path), "ps_file", "count", tool_data=tool_data
-    )
-    assert not df.empty
-    assert df.iloc[0]["Kernel_Name"] == "vecCopy"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1294,12 +1218,9 @@ def test_calc_pc_sampling_data_aggregation(
 def test_calc_pc_sampling_data_shared_code_object_kernel_names(
     tmp_path: Path,
 ) -> None:
-    """Bugfix A: two kernels in one code object get their own names per offset.
-
-    code object 5 holds vecCopy (kernel_id 100) and vecAdd (kernel_id 101) at
-    distinct offsets. Resolving via kernel_id (dispatch correlation) gives each
-    offset its real name; the old code_object_id mapping was last-wins.
-    """
+    """Each offset in a shared code object gets its own kernel name."""
+    # code object 5 holds vecCopy (kernel 100) and vecAdd (kernel 101) at
+    # distinct offsets; names resolve via kernel_id (dispatch correlation).
     write_results_json(
         tmp_path / "ps_file_results.json",
         stochastic=[
@@ -1321,28 +1242,20 @@ def test_calc_pc_sampling_data_shared_code_object_kernel_names(
     assert by_offset[0x20] == "vecAdd"
 
 
-def test_load_pc_sampling_data_no_debug_info_source_line_na(
-    tmp_path: Path,
-) -> None:
-    """Bugfix B: empty comment strings yield 'N/A' source lines, not a collapse.
-
-    Without source-line debug info every comment is "", which previously made
-    source_line empty and the per-instruction table single-row. The table now
-    stays multi-row with 'N/A' source lines.
-    """
-    write_results_json(
-        tmp_path / "ps_file_results.json",
+def test_load_pc_sampling_data_no_debug_info_source_line_na() -> None:
+    """Empty comment strings yield 'N/A' source lines across a multi-row table."""
+    # Without debug info every comment is "", which must not collapse the table.
+    tool_data = make_tool_data(
         stochastic=[
             make_record(5, 0x10, 0, dispatch_id=0, wave_issued=True),
             make_record(5, 0x20, 1, dispatch_id=0, wave_issued=True),
         ],
         instructions=["v_mov", "v_add"],
-        comments=["", ""],  # no debug info
+        comments=["", ""],
         kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
         kernel_dispatch=[make_dispatch(0, 100)],
     )
-    workload = schema.Workload()
-    df = load_pc_sampling_data(workload, str(tmp_path), "ps_file", "offset")
+    df = load_pc_sampling_data(schema.Workload(), "ps_file", "count", tool_data)
     assert len(df) == 2
     assert (df["source_line"] == "N/A").all()
 

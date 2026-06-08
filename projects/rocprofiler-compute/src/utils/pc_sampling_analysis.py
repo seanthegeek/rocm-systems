@@ -1,15 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Shared PC sampling analysis primitives.
+"""PC sampling analysis utilities.
 
-The CLI/TUI parser path and the analysis-database path both build a
-normalized PC sampling dataframe from the same parsed
-``rocprofiler-sdk-tool[0]`` dict. These stateless helpers hold that shared
-work; each caller projects the result onto its own output schema.
-
-All helpers operate on the already-parsed *tool_data* dict. File reading
-(of the potentially multi-GB results json) stays in the callers.
+Helpers for building a normalized PC sampling dataframe from a parsed
+``rocprofiler-sdk-tool[0]`` dict.
 """
 
 from typing import Any, Optional
@@ -62,18 +57,13 @@ def detect_pc_sampling_method(tool_data: dict[str, Any]) -> Optional[str]:
 
 
 def load_pc_sample_records(tool_data: dict[str, Any]) -> pd.DataFrame:
-    """Flatten ``pc_sample_{stochastic,host_trap}`` into normalized per-sample rows.
-
-    ``kernel_id`` is resolved through the ``kernel_dispatch`` records
-    (dispatch_id -> kernel_id), so samples that share a code object are still
-    attributed to the right kernel. Samples missing ``code_object_id``,
-    ``code_object_offset`` or ``inst_index`` are skipped. Returns an empty
-    dataframe with the normalized columns when no samples are present.
-    """
+    """Flatten the PC sample arrays into normalized per-sample rows."""
     buffer_records = tool_data["buffer_records"]
     samples = (
         buffer_records["pc_sample_stochastic"] + buffer_records["pc_sample_host_trap"]
     )
+    # kernel_id via dispatch correlation so kernels sharing a code object are
+    # attributed correctly.
     dispatch_to_kernel_id = {
         dispatch["dispatch_info"]["dispatch_id"]: dispatch["dispatch_info"]["kernel_id"]
         for dispatch in buffer_records["kernel_dispatch"]
@@ -86,6 +76,7 @@ def load_pc_sample_records(tool_data: dict[str, Any]) -> pd.DataFrame:
         code_object_id = pc_info.get("code_object_id")
         code_object_offset = pc_info.get("code_object_offset")
         inst_index = sample.get("inst_index")
+        # Skip records without the keys needed to place and label the sample.
         if None in (code_object_id, code_object_offset, inst_index):
             continue
         dispatch_id = record.get("dispatch_id")
@@ -106,14 +97,9 @@ def aggregate_pc_sample_records(
     records_df: pd.DataFrame,
     group_by: list[str],
 ) -> pd.DataFrame:
-    """Group normalized records, counting samples and stall reasons per group.
-
-    For each group: ``count`` (samples), ``count_issued`` / ``count_stalled``
-    (``None`` when ``wave_issued`` is absent, e.g. host_trap), and
-    ``stall_reason`` as a ``{reason: count}`` dict ordered by descending count
-    with unknown keys dropped. ``inst_index`` and ``kernel_id`` are carried
-    through as the group's first value when not part of *group_by*.
-    """
+    """Group normalized records into per-group counts and stall reasons."""
+    # inst_index and kernel_id are constant within a group; carry the first when
+    # they are not group keys.
     carried = [
         column for column in ("inst_index", "kernel_id") if column not in group_by
     ]
@@ -146,18 +132,7 @@ def enrich_with_metadata(
     tool_data: dict[str, Any],
     attach: set[str],
 ) -> pd.DataFrame:
-    """Attach instruction / source_line / kernel_name columns to *aggregated_df*.
-
-    *attach* selects which columns to add:
-
-    - ``"instruction"``: disassembly at ``inst_index``, ``None`` if out of range.
-    - ``"source_line"``: source comment at ``inst_index``, kept as the raw
-      string or ``"N/A"`` when empty or out of range (never ``""``, so display
-      code does not suppress the table). The ``.../basename`` display trim is
-      left to the caller, on real strings only.
-    - ``"kernel_name"``: formatted kernel name resolved via ``kernel_id``
-      (dispatch correlation), ``None`` when unmapped.
-    """
+    """Attach the columns named in *attach* by index into *tool_data*."""
     df = aggregated_df.copy()
     strings = tool_data["strings"]
     instructions = strings["pc_sample_instructions"]
@@ -168,6 +143,8 @@ def enrich_with_metadata(
             lambda index: instructions[index] if index < len(instructions) else None
         )
     if "source_line" in attach:
+        # Keep the raw comment; "N/A" (not "") when empty or out of range so the
+        # caller trims real strings and display code keeps the column.
         df["source_line"] = df["inst_index"].apply(
             lambda index: (
                 comments[index]

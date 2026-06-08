@@ -2,7 +2,6 @@
 # SPDX-License-Identifier:  MIT
 
 import argparse
-import json
 import re
 from pathlib import Path
 from typing import Any, Optional
@@ -408,12 +407,7 @@ def load_pc_sampling_data_per_kernel(
 ) -> pd.DataFrame:
     """Build the detailed per-instruction PC sampling table from *tool_data*.
 
-    Aggregates by (code_object_id, code_object_offset, kernel_id), enriches
-    with instruction, source line and kernel name, projects the
-    method-specific columns (6 for host_trap, 9 for stochastic, each ending
-    with ``Kernel_Name``), trims the source line for display and sorts. When
-    *kernel_name* is given the table is filtered to that kernel; otherwise
-    every kernel's rows are returned.
+    Filtered to *kernel_name* when given, otherwise every kernel's rows.
 
     :param method: "host_trap" or "stochastic".
     :param tool_data: The parsed ``rocprofiler-sdk-tool[0]`` dict.
@@ -455,8 +449,7 @@ def load_pc_sampling_data_per_kernel(
             console_warning(f"PC sampling: cannot find kernel '{kernel_name}'")
             return df
 
-    # stall_reason is a {reason: count} dict from the shared aggregation; the
-    # CLI table renders the legacy descending list[(reason, count)].
+    # Project stall_reason as a descending list[(reason, count)].
     df["stall_reason"] = df["stall_reason"].apply(_stall_reason_dict_to_list)
     df["source_line"] = df["source_line"].apply(_trim_source_line)
 
@@ -474,59 +467,32 @@ def load_pc_sampling_data_per_kernel(
 
     df_sorted["offset"] = df_sorted["offset"].apply(hex)
 
-    host_trap_columns = [
-        "source_line",
-        "instruction",
-        "code_object_id",
-        "offset",
-        "count",
-        "Kernel_Name",
-    ]
-    stochastic_columns = [
-        "source_line",
-        "instruction",
-        "code_object_id",
-        "offset",
-        "count",
-        "count_issued",
-        "count_stalled",
-        "stall_reason",
-        "Kernel_Name",
-    ]
-    columns_to_return = (
-        host_trap_columns if method == "host_trap" else stochastic_columns
+    # Stochastic adds issue/stall detail on top of the host_trap columns.
+    shared_columns = ["source_line", "instruction", "code_object_id", "offset", "count"]
+    stochastic_only_columns = ["count_issued", "count_stalled", "stall_reason"]
+    columns_to_return = shared_columns + (
+        stochastic_only_columns if method == "stochastic" else []
     )
+    columns_to_return.append("Kernel_Name")
     return df_sorted[columns_to_return]
 
 
 @demarcate
 def load_pc_sampling_data(
     workload: schema.Workload,
-    dir_path: str,
     file_prefix: str,
     sorting_type: str,
-    tool_data: Optional[dict[str, Any]] = None,
+    tool_data: Optional[dict[str, Any]],
 ) -> pd.DataFrame:
-    """Load PC sampling data and return the detailed per-instruction table.
+    """Return the detailed per-instruction table for a single kernel or all.
 
     Thin dispatcher over :func:`load_pc_sampling_data_per_kernel`: detects the
     method, then builds the table for all kernels (no ``-k``) or a single
-    kernel (one ``-k``). The output schema is identical either way.
-
-    *tool_data* is a parsed ``rocprofiler-sdk-tool[0]`` dict. When omitted the
-    (potentially multi-GB) results json is parsed from *dir_path*; callers that
-    already hold the parsed data should pass it to avoid re-reading the file.
+    kernel (one ``-k``). The output schema is identical either way. Callers
+    pass the already-parsed *tool_data*.
     """
-    if not file_prefix or file_prefix.lower() == "none":
+    if not file_prefix or file_prefix.lower() == "none" or tool_data is None:
         return pd.DataFrame()
-
-    if tool_data is None:
-        json_file_path = Path(dir_path) / f"{file_prefix}_results.json"
-        if not json_file_path.exists():
-            console_warning(f"PC sampling: can not read {json_file_path}")
-            return pd.DataFrame()
-        with json_file_path.open(encoding="utf-8") as json_file:
-            tool_data = json.load(json_file)["rocprofiler-sdk-tool"][0]
 
     pc_sampling_method = detect_pc_sampling_method(tool_data)
     if pc_sampling_method is None:
@@ -661,10 +627,9 @@ def load_non_mertrics_table(
         elif "from_pc_sampling" in df.columns:
             tmp[df_id] = load_pc_sampling_data(
                 workload,
-                dir_path,
                 df.loc[0, "from_pc_sampling"],
                 args.pc_sampling_sorting_type,
-                tool_data=pc_sampling_tool_data,
+                pc_sampling_tool_data,
             )
 
     workload.dfs.update(tmp)
