@@ -95,10 +95,7 @@ def enumerate_kernels():
     for ty in all_tys:
       for algo in ["AGxLL_R","RSxLD_AGxST"]:
         yield Rec(coll="AllReduce", algo=algo, red=red, ty=ty)
-      for algo in ["LL","LD"]:
-        yield Rec(coll="ReduceScatter", algo=algo, red=red, ty=ty)
-      # Multi-node GIN ReduceScatter; non-multicast only (no NVLS/multimem on ROCm).
-      for algo in ["RailA2A_LsaLD"]:
+      for algo in ["LL","LD","RailA2A_LsaLD"]:
         yield Rec(coll="ReduceScatter", algo=algo, red=red, ty=ty)
 
 def required_cuda(k):
