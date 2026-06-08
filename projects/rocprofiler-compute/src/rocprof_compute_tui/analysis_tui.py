@@ -48,7 +48,6 @@ class tui_analysis(OmniAnalyze_Base):
                 " available, metrics calculation will be"
                 " skipped",
             )
-            # Parse the (potentially multi-GB) results json once and share it.
             pc_sampling_data = file_io.load_pc_sampling_results(self.path)
 
             workload.raw_pmc = file_io.process_pc_sampling_kernel_trace(

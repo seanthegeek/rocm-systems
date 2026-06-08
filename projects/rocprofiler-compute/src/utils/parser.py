@@ -639,9 +639,6 @@ def load_pc_sampling_data_per_kernel(
     # Filter DataFrame to only include rows matching the requested kernel_name
     df = df[df["kernel_name"] == kernel_name]
 
-    # Convert offset column to hex string for display, keep original numeric for sorting
-    df["offset"] = df["offset"].apply(lambda x: hex(x))
-
     # Instruction disassembly and source-line comments are indexed by inst_index.
     instructions = tool_data["strings"]["pc_sample_instructions"]
     comments = tool_data["strings"]["pc_sample_comments"]
@@ -655,7 +652,8 @@ def load_pc_sampling_data_per_kernel(
         lambda x: f".../{Path(comments[x]).name}" if x < len(comments) else None
     )
 
-    # Sorting and returning relevant columns depending on method and sorting_type
+    # Sort on the numeric offset (lexicographic hex order is wrong), then
+    # format offset as hex for display.
     if sorting_type == "offset":
         df_sorted = df.sort_values(by=["code_object_id", "offset"])
     elif sorting_type == "count":
@@ -665,6 +663,8 @@ def load_pc_sampling_data_per_kernel(
             'Error: pc sampling sorting_type must be either "offset" or "count".'
         )
         return pd.DataFrame()
+
+    df_sorted["offset"] = df_sorted["offset"].apply(hex)
 
     columns_to_return = (
         [
@@ -717,9 +717,8 @@ def load_pc_sampling_data(
         if not json_file_path.exists():
             console_warning(f"PC sampling: can not read {json_file_path}")
             return pd.DataFrame()
-        tool_data = json.loads(json_file_path.read_text(encoding="utf-8"))[
-            "rocprofiler-sdk-tool"
-        ][0]
+        with json_file_path.open(encoding="utf-8") as json_file:
+            tool_data = json.load(json_file)["rocprofiler-sdk-tool"][0]
 
     # No kernel filter: aggregate samples across all kernels by source line.
     if not workload.filter_kernel_ids:
@@ -785,6 +784,8 @@ def _load_pc_sampling_no_filter_data(tool_data: dict[str, Any]) -> pd.DataFrame:
     )
     instructions = tool_data["strings"]["pc_sample_instructions"]
     comments = tool_data["strings"]["pc_sample_comments"]
+    if not instructions or not comments:
+        console_error("PC sampling: instruction or comment string table is empty.")
     kernel_id_to_name = {
         symbol["kernel_id"]: symbol["formatted_kernel_name"]
         for symbol in tool_data["kernel_symbols"]

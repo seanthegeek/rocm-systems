@@ -69,8 +69,6 @@ class cli_analysis(OmniAnalyze_Base):
                     " skipped",
                 )
 
-                # Parse the (potentially multi-GB) results json once and
-                # share it across both consumers below.
                 pc_sampling_data = file_io.load_pc_sampling_results(path_info[0])
 
                 workload.raw_pmc = file_io.process_pc_sampling_kernel_trace(

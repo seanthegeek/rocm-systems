@@ -503,6 +503,28 @@ def test_load_per_kernel_schema_and_sort(
         assert offsets == sorted(offsets)
 
 
+def test_load_per_kernel_offset_sort_is_numeric() -> None:
+    """Offset sort orders by numeric value, not lexicographic hex string."""
+    tool_data = make_tool_data(
+        host_trap=[
+            make_record(5, 0x100, 0, dispatch_id=0),
+            make_record(5, 0x20, 1, dispatch_id=1),
+        ],
+        instructions=["a", "b"],
+        comments=["/src/f.cpp:1", "/src/f.cpp:2"],
+        kernel_symbols=[make_kernel_symbol(100, 5, "vecCopy")],
+        kernel_dispatch=[make_dispatch(0, 100), make_dispatch(1, 100)],
+    )
+    df = load_pc_sampling_data_per_kernel(
+        method="host_trap",
+        tool_data=tool_data,
+        kernel_name="vecCopy",
+        sorting_type="offset",
+    )
+    # 0x20 (32) must precede 0x100 (256); lexicographic order would invert them.
+    assert df["offset"].tolist() == ["0x20", "0x100"]
+
+
 def make_per_kernel_guard_data(
     instructions: list | None,
     comments: list | None,

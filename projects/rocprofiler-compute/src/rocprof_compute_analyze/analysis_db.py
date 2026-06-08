@@ -75,9 +75,6 @@ class db_analysis(OmniAnalyze_Base):
             )
 
         self._roofline_ceilings_per_workload = self.calc_roofline_ceilings()
-        # Parse each workload's (potentially multi-GB) results json once and
-        # share it across the PC sampling and dispatch calculations below; the
-        # local map is released when pre_processing returns.
         pc_sampling_tool_data = (
             {path: load_pc_sampling_results(path) for path in self._runs}
             if self.pc_sampling_only()

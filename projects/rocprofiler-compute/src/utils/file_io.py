@@ -229,14 +229,14 @@ def load_pc_sampling_results(workload_path: str) -> Optional[dict[str, Any]]:
     Parse ``ps_file_results.json`` and return its ``rocprofiler-sdk-tool[0]``
     record, or ``None`` if the file is absent.
 
-    The results json can be multiple GB, so callers should parse once and
-    pass the returned dict to the PC sampling consumers rather than
-    re-reading the file.
+    The json can be multiple GB: parse once here and pass the dict to every
+    PC sampling consumer instead of re-reading the file.
     """
     json_path = Path(workload_path) / "ps_file_results.json"
     if not json_path.exists():
         return None
-    return json.loads(json_path.read_text(encoding="utf-8"))["rocprofiler-sdk-tool"][0]
+    with json_path.open(encoding="utf-8") as json_file:
+        return json.load(json_file)["rocprofiler-sdk-tool"][0]
 
 
 def process_pc_sampling_kernel_trace(

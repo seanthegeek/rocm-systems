@@ -121,7 +121,6 @@ class webui_analysis(OmniAnalyze_Base):
             run_workload = base_data[base_run]
 
             if self.pc_sampling_only():
-                # Parse the (potentially multi-GB) results json once and share it.
                 pc_sampling_data = file_io.load_pc_sampling_results(str(self.dest_dir))
                 run_workload.raw_pmc = file_io.process_pc_sampling_kernel_trace(
                     pc_sampling_data
@@ -430,7 +429,6 @@ class webui_analysis(OmniAnalyze_Base):
                 "analysis",
                 "PC sampling only -- skipping counter collection data loading",
             )
-            # Parse the (potentially multi-GB) results json once and share it.
             pc_sampling_data = file_io.load_pc_sampling_results(str(self.dest_dir))
             workload.raw_pmc = file_io.process_pc_sampling_kernel_trace(
                 pc_sampling_data
