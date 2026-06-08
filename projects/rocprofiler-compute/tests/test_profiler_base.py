@@ -18,22 +18,59 @@ from utils.utils_exceptions import (
 )
 
 
-def _make_sanitize_args(remaining, torch_trace=False):
-    """Build a minimal argparse.Namespace for sanitize() unit tests."""
+def _make_rpc_args(
+    *,
+    filter_blocks=None,
+    filter_metrics=None,
+    pc_sampling=False,
+    pc_sampling_method="stochastic",
+    pc_sampling_interval=None,
+    membw_analysis=False,
+    experimental=False,
+    mode="profile",
+    remaining=None,
+    torch_trace=False,
+) -> argparse.Namespace:
+    """Build a minimal Namespace for sanitize() unit tests."""
     return argparse.Namespace(
-        filter_blocks=[],
+        mode=mode,
+        list_metrics=None,
+        list_blocks=None,
+        list_available_metrics=False,
+        list_sets=False,
+        specs=False,
+        filter_blocks=filter_blocks,
+        filter_metrics=filter_metrics,
+        pc_sampling=pc_sampling,
+        pc_sampling_method=pc_sampling_method,
+        pc_sampling_interval=pc_sampling_interval,
+        membw_analysis=membw_analysis,
+        experimental=experimental,
         set_selected=None,
         roof_only=False,
-        output_directory="/tmp/test_workload",
+        bench_only=False,
+        no_roof=False,
+        format_rocprof_output="csv",
+        name="unit-test",
+        output_directory="/tmp/unit-test",
         no_native_tool=False,
         iteration_multiplexing=None,
         attach_pid=None,
         attach_duration_msec=None,
         spatial_multiplexing=None,
-        remaining=["--"] + remaining,
+        remaining=["--"] + remaining if remaining is not None else None,
         torch_trace=torch_trace,
         dispatch=None,
     )
+
+
+def _make_rpc(args: argparse.Namespace) -> RocProfCompute:
+    """Construct a RocProfCompute without invoking __init__."""
+    instance = RocProfCompute.__new__(RocProfCompute)
+    # Name-mangled private attributes consumed by sanitize().
+    instance._RocProfCompute__args = args
+    instance._RocProfCompute__mode = args.mode
+    return instance
 
 
 def _setup_test_files(tmp_path, remaining, setup):
@@ -141,7 +178,7 @@ def _setup_test_files(tmp_path, remaining, setup):
 def test_sanitize_torch_trace(tmp_path, remaining, expected_exception, setup):
     """Unit test: sanitize() behavior with --torch-trace enabled."""
     remaining = _setup_test_files(tmp_path, remaining, setup)
-    args = _make_sanitize_args(remaining, torch_trace=True)
+    args = _make_rpc_args(remaining=remaining, torch_trace=True)
     profiler = RocProfCompute_Base(args, profiler_mode="rocprofiler-sdk", soc=None)
     if expected_exception:
         with pytest.raises(expected_exception):
@@ -223,7 +260,7 @@ def test_sanitize_torch_trace(tmp_path, remaining, expected_exception, setup):
 def test_sanitize_no_torch_trace(tmp_path, remaining, expected_exception, setup):
     """Unit test: sanitize() behavior without --torch-trace."""
     remaining = _setup_test_files(tmp_path, remaining, setup)
-    args = _make_sanitize_args(remaining, torch_trace=False)
+    args = _make_rpc_args(remaining=remaining, torch_trace=False)
     profiler = RocProfCompute_Base(args, profiler_mode="rocprofiler-sdk", soc=None)
     if expected_exception:
         with pytest.raises(expected_exception):
@@ -292,51 +329,6 @@ def test_attach_library_resolution_with_fallback():
 # ---------------------------------------------------------------------------
 # RocProfCompute.sanitize(): block 21 / block 30 experimental-gating
 # ---------------------------------------------------------------------------
-def _make_rpc_args(
-    *,
-    filter_blocks=None,
-    filter_metrics=None,
-    pc_sampling=False,
-    pc_sampling_method="stochastic",
-    pc_sampling_interval=None,
-    membw_analysis=False,
-    experimental=False,
-    mode="profile",
-) -> argparse.Namespace:
-    """Build a minimal Namespace for RocProfCompute.sanitize() unit tests."""
-    return argparse.Namespace(
-        mode=mode,
-        list_metrics=None,
-        list_blocks=None,
-        list_available_metrics=False,
-        list_sets=False,
-        specs=False,
-        filter_blocks=filter_blocks,
-        filter_metrics=filter_metrics,
-        pc_sampling=pc_sampling,
-        pc_sampling_method=pc_sampling_method,
-        pc_sampling_interval=pc_sampling_interval,
-        membw_analysis=membw_analysis,
-        experimental=experimental,
-        set_selected=None,
-        roof_only=False,
-        bench_only=False,
-        no_roof=False,
-        format_rocprof_output="csv",
-        name="unit-test",
-        output_directory="/tmp/unit-test",
-    )
-
-
-def _make_rpc_with_args(args: argparse.Namespace) -> RocProfCompute:
-    """Construct a RocProfCompute without invoking __init__."""
-    instance = RocProfCompute.__new__(RocProfCompute)
-    # Name-mangled private attributes consumed by sanitize().
-    instance._RocProfCompute__args = args
-    instance._RocProfCompute__mode = args.mode
-    return instance
-
-
 @pytest.mark.parametrize(
     "args, expect_error, expected_filter_blocks",
     [
@@ -394,7 +386,7 @@ def _make_rpc_with_args(args: argparse.Namespace) -> RocProfCompute:
 )
 def test_sanitize_block_experimental_gating(args, expect_error, expected_filter_blocks):
     """Unit test: block 21 and block 30 require their experimental flags."""
-    instance = _make_rpc_with_args(args)
+    instance = _make_rpc(args)
     if expect_error:
         with pytest.raises(SystemExit):
             instance.sanitize()
@@ -425,7 +417,7 @@ def test_sanitize_pc_sampling_interval(
         pc_sampling_method=method,
         pc_sampling_interval=interval,
     )
-    instance = _make_rpc_with_args(args)
+    instance = _make_rpc(args)
     if expect_error:
         with pytest.raises(SystemExit):
             instance.sanitize()
