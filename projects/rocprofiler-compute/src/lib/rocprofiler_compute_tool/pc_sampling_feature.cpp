@@ -30,9 +30,52 @@ pc_sampling_feature_t::pc_sampling_feature_t(PcSamplingMode               mode,
 {
 }
 
+pc_sampling_feature_t::pc_sampling_feature_t(PcSamplingMode        mode,
+                                             std::filesystem::path output_root,
+                                             std::filesystem::path code_obj_path,
+                                             std::filesystem::path pc_samples_path)
+    : pc_sampling_feature_t(mode,
+                            std::move(output_root),
+                            std::move(code_obj_path),
+                            std::move(pc_samples_path),
+                            pc_sampling_collector_t::create())
+{
+}
+
+pc_sampling_feature_t::pc_sampling_feature_t(PcSamplingMode               mode,
+                                             std::filesystem::path        output_root,
+                                             std::filesystem::path        code_obj_path,
+                                             std::filesystem::path        pc_samples_path,
+                                             pc_sampling_collector_t::ptr collector)
+    : m_enabled(true)
+    , m_mode(mode)
+    , m_output_path(std::move(code_obj_path))
+    , m_output_root(std::move(output_root))
+    , m_pc_samples_path(std::move(pc_samples_path))
+    , m_collector(std::move(collector))
+{
+}
+
 void pc_sampling_feature_t::on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info)
 {
     m_collector->on_code_object_load(info);
+}
+
+void pc_sampling_feature_t::append_sample(const pc_sample_record_t& record)
+{
+    m_collector->append_sample(record);
+}
+
+void pc_sampling_feature_t::add_kernel_symbol(uint64_t           code_object_id,
+                                              const std::string& formatted_kernel_name)
+{
+    m_collector->add_kernel_symbol(code_object_id, formatted_kernel_name);
+}
+
+instruction_t pc_sampling_feature_t::resolve_instruction(uint64_t code_object_id,
+                                                         uint64_t code_object_offset)
+{
+    return m_collector->resolve_instruction(code_object_id, code_object_offset);
 }
 
 void pc_sampling_feature_t::finalize()
@@ -40,4 +83,10 @@ void pc_sampling_feature_t::finalize()
     code_object_writer_json_t writer;
     m_collector->write(writer);
     writer.flush(m_output_path);
+
+    pc_sample_writer_json_t pc_writer;
+    m_collector->write_samples(pc_writer);
+    pc_writer.flush(m_pc_samples_path);
+
+    m_collector->snapshot_sources(m_output_root);
 }

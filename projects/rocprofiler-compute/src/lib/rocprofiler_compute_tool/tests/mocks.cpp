@@ -51,6 +51,26 @@ std::string_view MockInputParameters::get_pc_sampling_beta_enabled()
     return std::string_view{m_pc_sampling_beta_enabled};
 }
 
+std::string_view MockInputParameters::get_pc_sampling_interval()
+{
+    return std::string_view{m_pc_sampling_interval};
+}
+
+std::string_view MockInputParameters::get_pc_sampling_unit()
+{
+    return std::string_view{m_pc_sampling_unit};
+}
+
+void MockInputParameters::set_pc_sampling_interval(const std::string& interval)
+{
+    m_pc_sampling_interval = interval;
+}
+
+void MockInputParameters::set_pc_sampling_unit(const std::string& unit)
+{
+    m_pc_sampling_unit = unit;
+}
+
 void MockInputParameters::set_pc_sampling_method(const std::string& method)
 {
     m_pc_sampling_method = method;
@@ -249,6 +269,94 @@ const std::vector<MockSdkWrapper::query_counter_record_info>& MockSdkWrapper::ge
     return m_query_counter_record_info;
 }
 
+void MockSdkWrapper::query_available_gpu_agents(std::vector<rocprofiler_agent_id_t>& out_gpu_agents)
+{
+    out_gpu_agents = m_gpu_agents;
+}
+
+void MockSdkWrapper::query_pc_sampling_configs(rocprofiler_agent_id_t /*agent_id*/,
+                                               rocprofiler_available_pc_sampling_configurations_cb_t cb,
+                                               void* user_data)
+{
+    if (!m_pc_sampling_config_set)
+        return;
+
+    rocprofiler_pc_sampling_configuration_t config{};
+    config.size         = sizeof(rocprofiler_pc_sampling_configuration_t);
+    config.method       = m_pc_sampling_config.method;
+    config.unit         = m_pc_sampling_config.unit;
+    config.min_interval = m_pc_sampling_config.min_interval;
+    config.max_interval = m_pc_sampling_config.max_interval;
+    config.flags        = 0;
+    cb(&config, 1, user_data);
+}
+
+void MockSdkWrapper::create_buffer(rocprofiler_context_id_t context_id,
+                                   size_t                   size,
+                                   size_t                   watermark,
+                                   rocprofiler_buffer_policy_t /*policy*/,
+                                   rocprofiler_buffer_tracing_cb_t /*callback*/,
+                                   void* /*callback_data*/,
+                                   rocprofiler_buffer_id_t* buffer_id)
+{
+    const uint64_t assigned = m_next_buffer_id++;
+    if (buffer_id != nullptr)
+        buffer_id->handle = assigned;
+    m_create_buffer_info.push_back(create_buffer_info{context_id.handle, size, watermark, assigned});
+}
+
+rocprofiler_status_t MockSdkWrapper::configure_pc_sampling_service(rocprofiler_context_id_t /*context_id*/,
+                                                                   rocprofiler_agent_id_t agent_id,
+                                                                   rocprofiler_pc_sampling_method_t method,
+                                                                   rocprofiler_pc_sampling_unit_t unit,
+                                                                   uint64_t interval,
+                                                                   rocprofiler_buffer_id_t buffer_id,
+                                                                   int /*flags*/)
+{
+    m_configure_pc_sampling_info.push_back(
+        configure_pc_sampling_info{agent_id, method, unit, interval, buffer_id.handle});
+    return m_configure_pc_sampling_status;
+}
+
+void MockSdkWrapper::flush_buffer(rocprofiler_buffer_id_t buffer_id)
+{
+    m_flush_buffer_info.push_back(flush_buffer_info{buffer_id.handle});
+}
+
+void MockSdkWrapper::set_available_gpu_agents(std::vector<rocprofiler_agent_id_t> agents)
+{
+    m_gpu_agents = std::move(agents);
+}
+
+void MockSdkWrapper::set_pc_sampling_config(size_t                           min_interval,
+                                            size_t                           max_interval,
+                                            rocprofiler_pc_sampling_method_t method,
+                                            rocprofiler_pc_sampling_unit_t   unit)
+{
+    m_pc_sampling_config     = pc_sampling_config_t{min_interval, max_interval, method, unit};
+    m_pc_sampling_config_set = true;
+}
+
+void MockSdkWrapper::set_configure_pc_sampling_status(rocprofiler_status_t status)
+{
+    m_configure_pc_sampling_status = status;
+}
+
+const std::vector<MockSdkWrapper::create_buffer_info>& MockSdkWrapper::get_create_buffer_info() const
+{
+    return m_create_buffer_info;
+}
+
+const std::vector<MockSdkWrapper::configure_pc_sampling_info>& MockSdkWrapper::get_configure_pc_sampling_info() const
+{
+    return m_configure_pc_sampling_info;
+}
+
+const std::vector<MockSdkWrapper::flush_buffer_info>& MockSdkWrapper::get_flush_buffer_info() const
+{
+    return m_flush_buffer_info;
+}
+
 /////////////////////////////////////////////////////////////////////////
 // MockCountersWriter
 void MockCountersWriter::write_counters(rocprofiler_compute_tool::tool_data_t* tool_data)
@@ -274,3 +382,32 @@ void MockPcSamplingCollector::on_code_object_load(
 }
 
 void MockPcSamplingCollector::write(rocprofiler_compute_tool::code_object_writer_t& /*writer*/) {}
+
+void MockPcSamplingCollector::append_sample(const rocprofiler_compute_tool::pc_sample_record_t& record)
+{
+    ++append_sample_count;
+    appended_samples.push_back(record);
+}
+
+void MockPcSamplingCollector::add_kernel_symbol(uint64_t           code_object_id,
+                                                const std::string& formatted_kernel_name)
+{
+    added_kernel_symbols.emplace_back(code_object_id, formatted_kernel_name);
+}
+
+rocprofiler_compute_tool::instruction_t MockPcSamplingCollector::resolve_instruction(
+    uint64_t /*code_object_id*/,
+    uint64_t /*code_object_offset*/)
+{
+    return rocprofiler_compute_tool::instruction_t{};
+}
+
+void MockPcSamplingCollector::write_samples(rocprofiler_compute_tool::pc_sample_writer_t& /*writer*/)
+{
+    ++write_samples_count;
+}
+
+size_t MockPcSamplingCollector::snapshot_sources(const std::filesystem::path& /*output_root*/)
+{
+    return 0;
+}
