@@ -7,11 +7,13 @@ Test Executor Module
 Handles test execution, build processes, and result tracking
 """
 
+import glob
 import json
 import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -659,7 +661,6 @@ class TestExecutor:
         - rccl_home:      Path to the RCCL install/build to link against. Defaults to
                           the RCCL build_dir produced by build_rccl(). Exported as both
                           NCCL_HOME and RCCL_HOME for the build.
-        - parallel_jobs:  Number of parallel compilation jobs (passed via -j).
         - env_variables:  Extra environment variables to set during the build.
 
         Returns:
@@ -705,8 +706,10 @@ class TestExecutor:
         # RCCL to link against: explicit rccl_home, else the RCCL build_dir we built.
         rccl_home = _expand(cfg.get("rccl_home", self.build_dir))
 
-        install_flags = list(cfg.get("install_flags", []))
-        parallel_jobs = cfg.get("parallel_jobs")
+        # Expand env vars / ~ in each flag so values like
+        # "--hip_compiler ${HIP_COMPILER:-$HOME/.local/llvm/bin/amdclang++}"
+        # resolve before being passed to install.sh (argv is not shell-expanded).
+        install_flags = [_expand(f) for f in cfg.get("install_flags", [])]
         build_env_vars = cfg.get("env_variables", {})
 
         # Build the command: explicit build_command wins, otherwise install.sh + flags.
@@ -721,9 +724,19 @@ class TestExecutor:
                 print("       Provide rccl_tests_build_configuration.build_command or "
                       "install_script.")
                 return False
+            # rccl-tests/install.sh parses args with getopt (short opts: hmt) and
+            # parallelizes internally with -j$(nproc); it does NOT accept a -j flag.
+            # It also ignores NCCL_HOME/RCCL_HOME/MPI_HOME from the environment, so
+            # the RCCL and MPI locations must be passed as explicit flags (only
+            # ROCM_PATH is read from the env).
+            if rccl_home and "--rccl_home" not in install_flags:
+                install_flags += ["--rccl_home", rccl_home]
+            if rocm_path and "--rocm_home" not in install_flags:
+                install_flags += ["--rocm_home", rocm_path]
+            mpi_requested = any(f in ("--mpi", "-m") for f in install_flags)
+            if mpi_requested and mpi_path and "--mpi_home" not in install_flags:
+                install_flags += ["--mpi_home", mpi_path]
             cmd = [install_script] + install_flags
-            if parallel_jobs:
-                cmd.extend(["-j", str(parallel_jobs)])
             use_shell = False
 
         # Setup environment: point rccl-tests at the RCCL we just built.
@@ -830,6 +843,37 @@ class TestExecutor:
         if self.args.verbose:
             print(f"  Binary resolved via default build_dir/test: {resolved}")
         return resolved
+
+    def _terminate_process_group(self, proc):
+        """Tear down the entire process group of ``proc`` (SIGTERM, then SIGKILL).
+
+        Tests are launched with ``start_new_session=True`` so the shell, mpirun,
+        orted and all spawned ranks share one process group (pgid == proc.pid).
+        Signalling the group -- rather than just ``proc`` -- guarantees a timed-out
+        or interrupted MPI job does not leave orphaned ranks holding the GPUs.
+        """
+        try:
+            pgid = os.getpgid(proc.pid)
+        except (ProcessLookupError, OSError):
+            return  # already gone
+
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            try:
+                os.killpg(pgid, sig)
+            except (ProcessLookupError, OSError):
+                return  # group already gone
+            try:
+                # Give the group a short grace period to exit on SIGTERM before
+                # escalating to SIGKILL.
+                proc.wait(timeout=10)
+                return
+            except subprocess.TimeoutExpired:
+                continue
+        # Reap to avoid a zombie even if it ignored SIGKILL (should not happen).
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
 
     def run_test(self, test_config, suite_config):
         """
@@ -1132,37 +1176,43 @@ class TestExecutor:
 
         # Inherit stdout/stderr (no PIPE capture). For gtest, --gtest_output=json:…
         # (temp file, removed in finally) supplies reliable SKIPPED vs PASSED on exit 0.
+        #
+        # Launch the test in its own session (start_new_session=True) so the
+        # shell AND every descendant -- mpirun, orted, and the spawned ranks /
+        # perf binaries -- share a single process group we can signal as a unit.
+        # subprocess.run(timeout=...) only SIGKILLs the immediate /bin/sh child,
+        # leaving mpirun and all of its ranks running (and holding the GPUs),
+        # which is exactly the orphaned-process behaviour seen on timeout.
         start_time = time.time()
-        run_kwargs = {
-            "shell": True,
-            "cwd": os.path.join(self.build_dir, "test"),
-            "env": env,
-            "capture_output": False,
-        }
-        if timeout > 0:
-            run_kwargs["timeout"] = timeout
+        proc = subprocess.Popen(
+            cmd,
+            shell=True,
+            cwd=os.path.join(self.build_dir, "test"),
+            env=env,
+            start_new_session=True,
+        )
         try:
             try:
-                result = subprocess.run(cmd, **run_kwargs)
-            except subprocess.TimeoutExpired as e:
+                returncode = proc.wait(timeout=timeout if timeout > 0 else None)
+            except subprocess.TimeoutExpired:
                 duration = time.time() - start_time
-                parts = []
-                if getattr(e, "stdout", None):
-                    parts.append(e.stdout)
-                if getattr(e, "stderr", None):
-                    parts.append(e.stderr)
-                combined = "".join(parts)
-                if combined:
-                    print(combined, end="" if combined.endswith("\n") else "\n")
                 print(f"\n  Result: {TestResult.RESULT_TIMEOUT.value} after {timeout} seconds")
+                print("  Killing process group (mpirun and all ranks)...")
+                self._terminate_process_group(proc)
                 return {
                     "name": test_name,
                     "result": TestResult.RESULT_TIMEOUT.value,
                     "duration": duration,
                     "error": f"Test timed out after {timeout} seconds",
                 }
+            except KeyboardInterrupt:
+                # Make sure Ctrl-C tears down the whole MPI job, not just the shell.
+                print("\n  Interrupted -- killing process group (mpirun and all ranks)...")
+                self._terminate_process_group(proc)
+                raise
             except Exception as e:
                 duration = time.time() - start_time
+                self._terminate_process_group(proc)
                 print(f"\n  ERROR: {e}")
                 return {
                     "name": test_name,
@@ -1174,12 +1224,12 @@ class TestExecutor:
             duration = time.time() - start_time
 
             if is_gtest:
-                rc = result.returncode if result.returncode is not None else -1
+                rc = returncode if returncode is not None else -1
                 test_result = infer_gtest_result_from_json_file(gtest_json_path or "", rc)
             else:
-                if result.returncode == ExitCode.EXIT_SUCCESS:
+                if returncode == ExitCode.EXIT_SUCCESS:
                     test_result = TestResult.RESULT_PASSED.value
-                elif result.returncode == ExitCode.EXIT_TIMEOUT:
+                elif returncode == ExitCode.EXIT_TIMEOUT:
                     test_result = TestResult.RESULT_TIMEOUT.value
                 else:
                     test_result = TestResult.RESULT_FAILED.value
@@ -1190,7 +1240,7 @@ class TestExecutor:
                 "name": test_name,
                 "result": test_result,
                 "duration": duration,
-                "exit_code": int(result.returncode) if result.returncode is not None else -1,
+                "exit_code": int(returncode) if returncode is not None else -1,
             }
         finally:
             if gtest_json_path:
@@ -1578,6 +1628,22 @@ class TestExecutor:
             print(f"Total Time:    {self._format_duration(rerun_time_seconds)}")
             print("="*120)
 
+    def _rccl_tests_build_dir(self):
+        """Resolve the rccl-tests build directory (``<source_dir>/build``).
+
+        Mirrors the path logic in ``build_rccl_tests`` so coverage discovery and
+        the build use the same location. Env vars and ``~`` are expanded with the
+        bash-aware expander (``${VAR:-default}`` support). Returns None when
+        rccl-tests is not configured.
+        """
+        cfg = self.rccl_tests_build_config
+        if not cfg:
+            return None
+        workdir = self.paths.get("workdir", os.getcwd())
+        source_dir = cfg.get("source_dir", os.path.join(workdir, "rccl-tests"))
+        source_dir = os.path.expanduser(expand_env_vars(str(source_dir)))
+        return os.path.join(source_dir, "build")
+
     def generate_coverage_report(self):
         """Generate code coverage report.
 
@@ -1598,14 +1664,28 @@ class TestExecutor:
         import glob
         import shutil
 
-        # Tests run with cwd=<build_dir>/test, so profraw files are written
-        # there. A recursive glob also picks up any files written elsewhere
-        # under the build tree (e.g. by ad-hoc runs).
-        profraw_files = glob.glob(os.path.join(self.build_dir, "**/*.profraw"), recursive=True)
+        # Tests run with cwd=<build_dir>/test, so RCCL profraw files are written
+        # there. The rccl-tests perf binaries are instrumented separately and
+        # their profraw files live under the rccl-tests build tree, so search
+        # both roots. A recursive glob also picks up files written elsewhere
+        # under either tree (e.g. by ad-hoc runs).
+        profraw_search_roots = [self.build_dir]
+        rccl_tests_build_dir = self._rccl_tests_build_dir()
+        if rccl_tests_build_dir:
+            profraw_search_roots.append(rccl_tests_build_dir)
+
+        profraw_files = []
+        for root in profraw_search_roots:
+            profraw_files.extend(
+                glob.glob(os.path.join(root, "**/*.profraw"), recursive=True)
+            )
+        # De-duplicate in case the roots overlap or are nested.
+        profraw_files = sorted({os.path.abspath(p) for p in profraw_files})
 
         if not profraw_files:
-            print("ERROR: No .profraw files found under the build directory:")
-            print(f"           {self.build_dir}")
+            print("ERROR: No .profraw files found under the build directories:")
+            for root in profraw_search_roots:
+                print(f"           {root}")
             if self.args.skip_tests:
                 print()
                 print("--coverage-report --skip-tests was requested, so this run did")
@@ -1702,6 +1782,15 @@ class TestExecutor:
                 if self.args.verbose:
                     print(f"Found binary: {binary_path}")
 
+        # Add rccl-tests perf binaries so their host coverage mapping is attributed.
+        if rccl_tests_build_dir and os.path.isdir(rccl_tests_build_dir):
+            perf_binaries = sorted(glob.glob(os.path.join(rccl_tests_build_dir, "*_perf")))
+            for perf_binary in perf_binaries:
+                if os.path.isfile(perf_binary):
+                    object_files.extend(["--object", perf_binary])
+                    if self.args.verbose:
+                        print(f"Found perf binary: {perf_binary}")
+
         if not object_files:
             print("WARNING: No object files found for coverage report")
             return
@@ -1712,7 +1801,8 @@ class TestExecutor:
         # Ignore patterns for non-relevant files
         ignore_regex = (
             ".*tuner_v.*|.*profiler_v.*|.*net_v.*|.*_deps.*|ext.*|"
-            ".*coll_net.*|.*nvls.*|.*nvml.*|.*nvtx.*|test/|.*gtest.*"
+            ".*coll_net.*|.*nvls.*|.*nvml.*|.*nvtx.*|test/|.*gtest.*|"
+            ".*gensrc/*|.*rccl-tests.*"
         )
 
         if self.args.verbose:
