@@ -1,20 +1,32 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
+#ifndef ROCPROFILER_SDK_EXPERIMENTAL
+#    define ROCPROFILER_SDK_EXPERIMENTAL
+#endif
+
 #include "rocprofiler_compute_tool.h"
 
 #include "counters_writer.h"
 #include "input_parameters.h"
+#include "pc_sample_writer.h"
 #include "sdk_callbacks.h"
 #include "sdk_wrapper.h"
 
+#include <rocprofiler-sdk/buffer.h>
+#include <rocprofiler-sdk/pc_sampling.h>
 #include <unistd.h>
 
 #include <atomic>
+#include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <mutex>
 #include <sstream>
+#include <string>
 #include <string_view>
+#include <vector>
 
 using namespace rocprofiler_compute_tool;
 
@@ -99,6 +111,151 @@ void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     g_sdk_callbacks->tool_tracing_callback(record, callback_data);
 }
 
+void pc_sampling_buffer_callback(rocprofiler_context_id_t /*context*/,
+                                 rocprofiler_buffer_id_t /*buffer_id*/,
+                                 rocprofiler_record_header_t** headers,
+                                 size_t                        num_headers,
+                                 void*                         tool_data,
+                                 uint64_t /*drop_count*/)
+{
+    if (headers == nullptr)
+        return;
+
+    auto* tool = static_cast<std::unique_ptr<tool_data_t>*>(tool_data)->get();
+
+    for (size_t i = 0; i < num_headers; ++i)
+    {
+        if (headers[i] == nullptr)
+            continue;
+        auto rec = decode_pc_sample_record(*headers[i]);
+        if (!rec)
+            continue;
+
+        std::lock_guard<std::mutex> lock(tool->mut);
+        // The feature owns the collector that the writer serializes from.
+        tool->pc_sampling.append_sample(*rec);
+    }
+}
+
+namespace
+{
+struct pc_sampling_config_query_t
+{
+    bool                             found                  = false;
+    bool                             supported_method_found = false;
+    size_t                           min_interval           = 0;
+    size_t                           max_interval           = 0;
+    rocprofiler_pc_sampling_method_t method                 = ROCPROFILER_PC_SAMPLING_METHOD_NONE;
+    rocprofiler_pc_sampling_unit_t   unit                   = ROCPROFILER_PC_SAMPLING_UNIT_NONE;
+    rocprofiler_pc_sampling_method_t requested_method       = ROCPROFILER_PC_SAMPLING_METHOD_NONE;
+};
+
+rocprofiler_status_t pc_sampling_config_cb(const rocprofiler_pc_sampling_configuration_t* configs,
+                                           size_t num_config,
+                                           void*  user_data)
+{
+    auto* query = static_cast<pc_sampling_config_query_t*>(user_data);
+    for (size_t i = 0; i < num_config; ++i)
+    {
+        if (!query->found)
+        {
+            // Default to the first configuration the agent reports.
+            query->found        = true;
+            query->min_interval = configs[i].min_interval;
+            query->max_interval = configs[i].max_interval;
+            query->method       = configs[i].method;
+            query->unit         = configs[i].unit;
+        }
+        if (configs[i].method == query->requested_method)
+        {
+            // Prefer the configuration that matches the requested method.
+            query->supported_method_found = true;
+            query->min_interval           = configs[i].min_interval;
+            query->max_interval           = configs[i].max_interval;
+            query->method                 = configs[i].method;
+            query->unit                   = configs[i].unit;
+        }
+    }
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+}  // namespace
+
+void setup_pc_sampling(rocprofiler_context_id_t ctx, tool_data_t* tool, void* user_data)
+{
+    std::vector<rocprofiler_agent_id_t> agents;
+    g_sdk_wrapper->query_available_gpu_agents(agents);
+
+    constexpr size_t kBufferSize = 4 * 1024 * 1024;
+    g_sdk_wrapper->create_buffer(ctx,
+                                 kBufferSize,
+                                 kBufferSize / 2,
+                                 ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                 pc_sampling_buffer_callback,
+                                 user_data,
+                                 &tool->pc_sampling_buffer_id);
+
+    const auto requested_method = (tool->pc_sampling.mode() == PcSamplingMode::Stochastic)
+                                      ? ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC
+                                      : ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP;
+
+    for (const auto& agent : agents)
+    {
+        pc_sampling_config_query_t query{};
+        query.requested_method = requested_method;
+        g_sdk_wrapper->query_pc_sampling_configs(agent, pc_sampling_config_cb, &query);
+
+        if (!query.found || !query.supported_method_found)
+        {
+            std::clog << "\033[33m[rocprofiler-compute] [" << __FUNCTION__
+                      << "] WARNING: requested PC sampling method not supported on agent (handle="
+                      << agent.handle << "); skipping.\033[0m" << std::endl;
+            continue;
+        }
+
+        const auto method = requested_method;
+        const auto unit   = query.unit;
+
+        // Pick the interval: honor the env-provided value when set, otherwise
+        // clamp to the agent-reported supported range.
+        uint64_t interval = 0;
+        if (!tool->pc_sampling_interval.empty())
+        {
+            try
+            {
+                interval = std::stoull(tool->pc_sampling_interval);
+            }
+            catch (const std::exception&)
+            {
+                interval = query.min_interval;
+            }
+        }
+        else
+        {
+            interval = query.min_interval;
+        }
+        if (query.max_interval != 0 && interval > query.max_interval)
+            interval = query.max_interval;
+        if (interval < query.min_interval)
+            interval = query.min_interval;
+
+        auto st = g_sdk_wrapper->configure_pc_sampling_service(ctx,
+                                                               agent,
+                                                               method,
+                                                               unit,
+                                                               interval,
+                                                               tool->pc_sampling_buffer_id,
+                                                               0);
+        if (st != ROCPROFILER_STATUS_SUCCESS)
+        {
+            std::clog << "\033[33m[rocprofiler-compute] [" << __FUNCTION__
+                      << "] WARNING: PC sampling configuration failed for agent (handle=" << agent.handle
+                      << "): " << rocprofiler_get_status_string(st)
+                      << "; continuing without PC sampling for this agent.\033[0m" << std::endl;
+            continue;
+        }
+    }
+}
+
 void on_hsa_runtime_loaded(rocprofiler_intercept_table_t /*type*/,
                            uint64_t /*lib_version*/,
                            uint64_t /*lib_instance*/,
@@ -121,6 +278,13 @@ void on_hsa_runtime_loaded(rocprofiler_intercept_table_t /*type*/,
                                                                 user_data,
                                                                 record_callback,
                                                                 user_data);
+
+    auto* tool = static_cast<std::unique_ptr<tool_data_t>*>(user_data)->get();
+    if (tool->pc_sampling.enabled())
+    {
+        setup_pc_sampling(get_client_ctx(), tool, user_data);
+    }
+
     g_sdk_wrapper->start_context(get_client_ctx());
 }
 
@@ -161,7 +325,10 @@ void generate_output(tool_data_t* tool_data)
     }
 
     if (tool_data->pc_sampling.enabled())
+    {
+        g_sdk_wrapper->flush_buffer(tool_data->pc_sampling_buffer_id);
         tool_data->pc_sampling.finalize();
+    }
 }
 
 void tool_fini(void* user_data)
@@ -189,6 +356,15 @@ static std::string generate_output_filename(std::string_view output_path, std::s
     return filename;
 }
 
+static std::string generate_fixed_output_path(std::string_view output_path, std::string_view filename)
+{
+    std::string path{output_path};
+    if (path.empty() || path.back() != '/')
+        path += '/';
+    path.append(filename);
+    return path;
+}
+
 std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
 {
     auto tool_data = std::make_unique<tool_data_t>();
@@ -200,8 +376,15 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
     {
         const auto pc_mode = parse_pc_sampling_mode(
             std::string{g_input_parameters->get_pc_sampling_method()});
+        // PC sampling interval/unit are read here so they are available when the
+        // PC sampling service is configured on HSA load.
+        tool_data->pc_sampling_interval = std::string{g_input_parameters->get_pc_sampling_interval()};
+        tool_data->pc_sampling_unit = std::string{g_input_parameters->get_pc_sampling_unit()};
         tool_data->pc_sampling =
-            pc_sampling_feature_t{pc_mode, generate_output_filename(output_path, "_code_obj_info.json")};
+            pc_sampling_feature_t{pc_mode,
+                                  std::filesystem::path{output_path},
+                                  generate_fixed_output_path(output_path, "code_obj_info.json"),
+                                  generate_fixed_output_path(output_path, "ps_file_results.json")};
     }
 
     // ROCPROF_COUNTERS env. var. is a string like "pmc: counter1 counter2 ..."
@@ -244,7 +427,7 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
                 tool_data->kernel_filter_ranges.emplace_back(start, end);
             }
         }
-        catch (const std::invalid_argument&)
+        catch (const std::exception&)
         {
             std::cerr << "[rocprofiler-compute] [" << __FUNCTION__
                       << "] ERROR: Invalid entry in ROCPROF_KERNEL_FILTER_RANGE: " << token

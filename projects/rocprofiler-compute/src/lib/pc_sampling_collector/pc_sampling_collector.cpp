@@ -3,9 +3,18 @@
 #include "pc_sampling_collector.h"
 
 #include "gsl_assert.h"
+#include "source_snapshot.h"
+
+#include <unistd.h>
 
 #include <ios>
 #include <iostream>
+#include <mutex>
+#include <optional>
+#include <set>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 using namespace rocprofiler_compute_tool;
 
@@ -60,4 +69,90 @@ void pc_sampling_collector_impl_t::write(code_object_writer_t& writer)
         }
         writer.end_code_obj();
     }
+}
+
+void pc_sampling_collector_impl_t::append_sample(const pc_sample_record_t& record)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_samples.push_back(record);
+}
+
+void pc_sampling_collector_impl_t::add_kernel_symbol(uint64_t           code_object_id,
+                                                     const std::string& formatted_kernel_name)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_kernel_symbols.push_back(kernel_symbol_entry_t{code_object_id, formatted_kernel_name});
+}
+
+instruction_t pc_sampling_collector_impl_t::resolve_instruction(uint64_t code_object_id,
+                                                                uint64_t code_object_offset)
+{
+    // PC sample offsets are relative to the code object's load base, but
+    // get_instruction keys on a global virtual address. Translate before lookup.
+    try
+    {
+        const uint64_t vaddr = code_object_offset + m_translator->get_load_base(code_object_id);
+        return m_translator->get_instruction(code_object_id, vaddr);
+    }
+    catch (const std::out_of_range&)
+    {
+        return instruction_t{};
+    }
+}
+
+void pc_sampling_collector_impl_t::write_samples(pc_sample_writer_t& writer)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    writer.begin();
+    for (const auto& sample : m_samples)
+    {
+        const instruction_t inst = resolve_instruction(sample.pc.code_object_id,
+                                                       sample.pc.code_object_offset);
+        const size_t        idx  = m_interner.intern(inst.name, inst.comment);
+
+        pc_sample_record_t s = sample;
+        s.inst_index         = idx;
+
+        switch (s.kind)
+        {
+        case pc_sample_kind_t::Stochastic:
+            writer.append_stochastic(s);
+            break;
+        case pc_sample_kind_t::HostTrap:
+            writer.append_host_trap(s);
+            break;
+        }
+    }
+
+    writer.set_strings(m_interner);
+    writer.set_kernel_symbols(m_kernel_symbols);
+    writer.set_metadata(static_cast<int>(getpid()));
+}
+
+size_t pc_sampling_collector_impl_t::snapshot_sources(const std::filesystem::path& output_root)
+{
+    std::set<std::string> unique_refs;
+    for (const auto& id : m_translator->get_code_object_ids())
+    {
+        const auto& symbols = m_translator->get_symbols(id);
+        for (const auto& sym : symbols)
+        {
+            uint64_t       pc  = sym.virtual_address;
+            const uint64_t end = sym.virtual_address + sym.size;
+            while (pc < end)
+            {
+                const auto& inst = m_translator->get_instruction(id, pc);
+                Expects(inst.size);
+                if (const auto ref = parse_source_ref(inst.comment))
+                {
+                    unique_refs.insert(*ref);
+                }
+                pc += inst.size;
+            }
+        }
+    }
+
+    const std::vector<std::string> refs(unique_refs.begin(), unique_refs.end());
+    return snapshot_source_files(refs, output_root);
 }

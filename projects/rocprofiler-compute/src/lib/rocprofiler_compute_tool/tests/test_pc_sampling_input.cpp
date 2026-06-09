@@ -1,0 +1,220 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier:  MIT
+#define ROCPROFILER_SDK_EXPERIMENTAL
+
+#include "test_pc_sampling_input.h"
+
+#include "environ_cache.h"
+#include "input_parameters.h"
+#include "mocks.h"
+#include "rocprofiler_compute_tool.h"
+
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
+
+#include <memory>
+#include <string>
+#include <string_view>
+#include <vector>
+
+using namespace rocprofiler_compute_tool;
+
+//////////////////////////////////////////////////////////////////////////
+/// (a) ENV READ
+TEST_F(TestPcSamplingInput, EnvInputParameters_PcSamplingIntervalAndUnit_ReturnInjectedValues)
+{
+    Envp envp{{"ROCPROF_PC_SAMPLING_INTERVAL=1048576", "ROCPROF_PC_SAMPLING_UNIT=cycles"}};
+    EnvInputParameters input_parameters{std::make_shared<EnvironCache>(envp.data())};
+
+    EXPECT_EQ(input_parameters.get_pc_sampling_interval(), std::string_view{"1048576"});
+    EXPECT_EQ(input_parameters.get_pc_sampling_unit(), std::string_view{"cycles"});
+}
+
+TEST_F(TestPcSamplingInput, EnvInputParameters_PcSamplingIntervalAndUnitUnset_ReturnEmpty)
+{
+    Envp               envp{{}};
+    EnvInputParameters input_parameters{std::make_shared<EnvironCache>(envp.data())};
+
+    EXPECT_EQ(input_parameters.get_pc_sampling_interval(), std::string_view{""});
+    EXPECT_EQ(input_parameters.get_pc_sampling_unit(), std::string_view{""});
+}
+
+//////////////////////////////////////////////////////////////////////////
+/// (b) MOCK ROUND-TRIP
+TEST_F(TestPcSamplingInput, MockInputParameters_SetPcSamplingInterval_RoundTrips)
+{
+    m_input_parameters->set_pc_sampling_interval("256");
+    EXPECT_EQ(m_input_parameters->get_pc_sampling_interval(), std::string_view{"256"});
+}
+
+TEST_F(TestPcSamplingInput, MockInputParameters_SetPcSamplingUnit_RoundTrips)
+{
+    m_input_parameters->set_pc_sampling_unit("cycles");
+    EXPECT_EQ(m_input_parameters->get_pc_sampling_unit(), std::string_view{"cycles"});
+}
+
+TEST_F(TestPcSamplingInput, MockInputParameters_PcSamplingIntervalAndUnit_DefaultEmpty)
+{
+    EXPECT_EQ(m_input_parameters->get_pc_sampling_interval(), std::string_view{""});
+    EXPECT_EQ(m_input_parameters->get_pc_sampling_unit(), std::string_view{""});
+}
+
+//////////////////////////////////////////////////////////////////////////
+/// (c) WIRING RECORDS CALLS
+TEST_F(TestPcSamplingInput, OnHsaRuntimeLoaded_SupportingAgent_CreatesBufferAndConfiguresService)
+{
+    constexpr rocprofiler_agent_id_t agent{42};
+    m_input_parameters->set_pc_sampling_beta_enabled("1");
+    m_input_parameters->set_pc_sampling_method("host_trap");
+    m_sdk_wrapper->set_available_gpu_agents({agent});
+    m_sdk_wrapper->set_pc_sampling_config(/*min_interval=*/1,
+                                          /*max_interval=*/1000,
+                                          ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP,
+                                          ROCPROFILER_PC_SAMPLING_UNIT_CYCLES);
+    m_sdk_wrapper->set_configure_pc_sampling_status(ROCPROFILER_STATUS_SUCCESS);
+
+    drive_hsa_runtime_loaded();
+
+    ASSERT_EQ(m_sdk_wrapper->get_create_buffer_info().size(), 1u);
+    ASSERT_EQ(m_sdk_wrapper->get_configure_pc_sampling_info().size(), 1u);
+    EXPECT_EQ(m_sdk_wrapper->get_configure_pc_sampling_info()[0].agent.handle, agent.handle);
+}
+
+//////////////////////////////////////////////////////////////////////////
+/// (d) WARN-AND-CONTINUE
+TEST_F(TestPcSamplingInput, OnHsaRuntimeLoaded_ConfigureReturnsError_DoesNotThrowAndStillAttempts)
+{
+    constexpr rocprofiler_agent_id_t agent{7};
+    m_input_parameters->set_pc_sampling_beta_enabled("1");
+    m_input_parameters->set_pc_sampling_method("host_trap");
+    m_sdk_wrapper->set_available_gpu_agents({agent});
+    m_sdk_wrapper->set_pc_sampling_config(/*min_interval=*/1,
+                                          /*max_interval=*/1000,
+                                          ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP,
+                                          ROCPROFILER_PC_SAMPLING_UNIT_CYCLES);
+    m_sdk_wrapper->set_configure_pc_sampling_status(ROCPROFILER_STATUS_ERROR);
+
+    EXPECT_NO_THROW(drive_hsa_runtime_loaded());
+
+    // The configure call was attempted (recorded) even though it failed.
+    EXPECT_EQ(m_sdk_wrapper->get_configure_pc_sampling_info().size(), 1u);
+}
+
+//////////////////////////////////////////////////////////////////////////
+/// (e) INTERVAL FALLBACK
+TEST_F(TestPcSamplingInput, OnHsaRuntimeLoaded_IntervalEnvUnset_UsesValueWithinAdvertisedRange)
+{
+    constexpr rocprofiler_agent_id_t agent{99};
+    constexpr uint64_t               min_interval = 64;
+    constexpr uint64_t               max_interval = 4096;
+
+    // Interval env intentionally left unset (default empty).
+    m_input_parameters->set_pc_sampling_beta_enabled("1");
+    m_input_parameters->set_pc_sampling_method("host_trap");
+    m_input_parameters->set_pc_sampling_interval("");
+    m_sdk_wrapper->set_available_gpu_agents({agent});
+    m_sdk_wrapper->set_pc_sampling_config(min_interval,
+                                          max_interval,
+                                          ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP,
+                                          ROCPROFILER_PC_SAMPLING_UNIT_CYCLES);
+    m_sdk_wrapper->set_configure_pc_sampling_status(ROCPROFILER_STATUS_SUCCESS);
+
+    drive_hsa_runtime_loaded();
+
+    ASSERT_EQ(m_sdk_wrapper->get_configure_pc_sampling_info().size(), 1u);
+    const auto chosen_interval = m_sdk_wrapper->get_configure_pc_sampling_info()[0].interval;
+    EXPECT_GE(chosen_interval, min_interval);
+    EXPECT_LE(chosen_interval, max_interval);
+}
+
+//////////////////////////////////////////////////////////////////////////
+/// (f) MULTI-AGENT: every supporting agent is configured
+TEST_F(TestPcSamplingInput, OnHsaRuntimeLoaded_MultipleSupportingAgents_ConfiguresEach)
+{
+    constexpr rocprofiler_agent_id_t agent_a{11};
+    constexpr rocprofiler_agent_id_t agent_b{22};
+    m_input_parameters->set_pc_sampling_beta_enabled("1");
+    m_input_parameters->set_pc_sampling_method("host_trap");
+    m_sdk_wrapper->set_available_gpu_agents({agent_a, agent_b});
+    m_sdk_wrapper->set_pc_sampling_config(1,
+                                          1000,
+                                          ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP,
+                                          ROCPROFILER_PC_SAMPLING_UNIT_CYCLES);
+    m_sdk_wrapper->set_configure_pc_sampling_status(ROCPROFILER_STATUS_SUCCESS);
+
+    drive_hsa_runtime_loaded();
+
+    ASSERT_EQ(m_sdk_wrapper->get_configure_pc_sampling_info().size(), 2u);
+    EXPECT_EQ(m_sdk_wrapper->get_configure_pc_sampling_info()[0].agent.handle, agent_a.handle);
+    EXPECT_EQ(m_sdk_wrapper->get_configure_pc_sampling_info()[1].agent.handle, agent_b.handle);
+}
+
+//////////////////////////////////////////////////////////////////////////
+/// (g) UNSUPPORTED METHOD: agent advertises a different method -> skipped, not configured
+TEST_F(TestPcSamplingInput, OnHsaRuntimeLoaded_AgentLacksRequestedMethod_SkipsConfigure)
+{
+    constexpr rocprofiler_agent_id_t agent{33};
+    m_input_parameters->set_pc_sampling_beta_enabled("1");
+    m_input_parameters->set_pc_sampling_method("host_trap");
+    m_sdk_wrapper->set_available_gpu_agents({agent});
+    // Agent advertises STOCHASTIC only; requested method is HOST_TRAP.
+    m_sdk_wrapper->set_pc_sampling_config(1,
+                                          1000,
+                                          ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC,
+                                          ROCPROFILER_PC_SAMPLING_UNIT_CYCLES);
+
+    EXPECT_NO_THROW(drive_hsa_runtime_loaded());
+
+    EXPECT_TRUE(m_sdk_wrapper->get_configure_pc_sampling_info().empty());
+}
+
+//////////////////////////////////////////////////////////////////////////
+/// (h) DISABLED BY DEFAULT: beta unset -> no service configured
+TEST_F(TestPcSamplingInput, OnHsaRuntimeLoaded_BetaDisabled_ConfiguresNothing)
+{
+    constexpr rocprofiler_agent_id_t agent{44};
+    // Beta intentionally left unset.
+    m_input_parameters->set_pc_sampling_method("host_trap");
+    m_sdk_wrapper->set_available_gpu_agents({agent});
+    m_sdk_wrapper->set_pc_sampling_config(1,
+                                          1000,
+                                          ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP,
+                                          ROCPROFILER_PC_SAMPLING_UNIT_CYCLES);
+
+    drive_hsa_runtime_loaded();
+
+    EXPECT_TRUE(m_sdk_wrapper->get_create_buffer_info().empty());
+    EXPECT_TRUE(m_sdk_wrapper->get_configure_pc_sampling_info().empty());
+}
+
+//////////////////////////////////////////////////////////////////////////
+/// TestPcSamplingInput
+void TestPcSamplingInput::SetUp()
+{
+    m_input_parameters = std::make_shared<MockInputParameters>();
+    m_sdk_wrapper      = std::make_shared<MockSdkWrapper>();
+    m_counters_writer  = std::make_shared<MockCountersWriter>();
+
+    test_knobs::set_input_parameters(m_input_parameters);
+    test_knobs::set_sdk_wrapper(m_sdk_wrapper);
+    test_knobs::set_csv_writer(m_counters_writer);
+}
+
+void TestPcSamplingInput::TearDown()
+{
+    test_knobs::reset_cfg();
+}
+
+tool_data_t* TestPcSamplingInput::get_tool_data(const rocprofiler_tool_configure_result_t* cfg)
+{
+    return (static_cast<std::unique_ptr<tool_data_t>*>(cfg->tool_data))->get();
+}
+
+void TestPcSamplingInput::drive_hsa_runtime_loaded()
+{
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
+    ASSERT_EQ(m_sdk_wrapper->get_hsa_intercept_registration_info().size(), 1u);
+    const auto reg = m_sdk_wrapper->get_hsa_intercept_registration_info()[0];
+    reg.callback(ROCPROFILER_HSA_TABLE, 0, 0, nullptr, 0, reg.user_data);
+}
