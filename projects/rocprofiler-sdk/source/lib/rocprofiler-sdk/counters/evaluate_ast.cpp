@@ -298,6 +298,12 @@ load_asts()
             {
                 if(by_name.find(tn) == by_name.end())
                 {
+                    // The non-empty constant ("yes") is required: core.cpp classifies
+                    // a required metric as a special/topology counter only when
+                    // constant() is non-empty (matching get_constants() in metrics.cpp).
+                    // Otherwise the stub is treated as a hardware counter, never gets
+                    // populated via read_special_counters(), and evaluation fails with
+                    // "Unable to lookup results for metric <name>".
                     by_name.emplace(tn,
                                     Metric(gfx,
                                            tn,
@@ -305,7 +311,7 @@ load_asts()
                                            std::string{},
                                            std::string{},
                                            std::string{},
-                                           std::string{},
+                                           std::string{"yes"},
                                            synth_metric_id++));
                 }
             }
