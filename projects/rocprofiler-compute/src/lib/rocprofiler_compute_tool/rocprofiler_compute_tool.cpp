@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <charconv>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -123,6 +124,10 @@ void pc_sampling_buffer_callback(rocprofiler_context_id_t /*context*/,
 
     auto* tool = static_cast<std::unique_ptr<tool_data_t>*>(tool_data)->get();
 
+    // Decode the whole batch first, then append under a single lock acquisition
+    // rather than locking once per record on this hot ingestion path.
+    std::vector<pc_sample_record_t> decoded;
+    decoded.reserve(num_headers);
     for (size_t i = 0; i < num_headers; ++i)
     {
         if (headers[i] == nullptr)
@@ -130,11 +135,16 @@ void pc_sampling_buffer_callback(rocprofiler_context_id_t /*context*/,
         auto rec = decode_pc_sample_record(*headers[i]);
         if (!rec)
             continue;
-
-        std::lock_guard<std::mutex> lock(tool->mut);
-        // The feature owns the collector that the writer serializes from.
-        tool->pc_sampling.append_sample(*rec);
+        decoded.push_back(std::move(*rec));
     }
+
+    if (decoded.empty())
+        return;
+
+    std::lock_guard<std::mutex> lock(tool->mut);
+    // The feature owns the collector that the writer serializes from.
+    for (const auto& rec : decoded)
+        tool->pc_sampling.append_sample(rec);
 }
 
 namespace
@@ -216,22 +226,26 @@ void setup_pc_sampling(rocprofiler_context_id_t ctx, tool_data_t* tool, void* us
         const auto unit   = query.unit;
 
         // Pick the interval: honor the env-provided value when set, otherwise
-        // clamp to the agent-reported supported range.
-        uint64_t interval = 0;
+        // clamp to the agent-reported supported range. Parse the whole string so
+        // a sign or trailing garbage ("-1", "100abc") falls back instead of
+        // silently wrapping or truncating.
+        uint64_t interval = query.min_interval;
         if (!tool->pc_sampling_interval.empty())
         {
-            try
+            const auto& s        = tool->pc_sampling_interval;
+            uint64_t    val      = 0;
+            const auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), val);
+            if (ec == std::errc{} && ptr == s.data() + s.size())
             {
-                interval = std::stoull(tool->pc_sampling_interval);
+                interval = val;
             }
-            catch (const std::exception&)
+            else
             {
-                interval = query.min_interval;
+                std::clog << "\033[33m[rocprofiler-compute] [" << __FUNCTION__
+                          << "] WARNING: invalid ROCPROF_PC_SAMPLING_INTERVAL '" << s
+                          << "'; falling back to the agent minimum (" << query.min_interval
+                          << ").\033[0m" << std::endl;
             }
-        }
-        else
-        {
-            interval = query.min_interval;
         }
         if (query.max_interval != 0 && interval > query.max_interval)
             interval = query.max_interval;
@@ -326,8 +340,21 @@ void generate_output(tool_data_t* tool_data)
 
     if (tool_data->pc_sampling.enabled())
     {
-        g_sdk_wrapper->flush_buffer(tool_data->pc_sampling_buffer_id);
-        tool_data->pc_sampling.finalize();
+        // finalize() runs inside the SDK tool-fini callback, which has no
+        // exception barrier. A serialization failure (e.g. a zero-size decoded
+        // instruction or an unwritable output path) must not escape and
+        // std::terminate the process mid-shutdown.
+        try
+        {
+            g_sdk_wrapper->flush_buffer(tool_data->pc_sampling_buffer_id);
+            tool_data->pc_sampling.finalize();
+        }
+        catch (const std::exception& e)
+        {
+            std::clog << "\033[33m[rocprofiler-compute] [" << __FUNCTION__
+                      << "] WARNING: PC sampling serialization failed: " << e.what()
+                      << "; continuing shutdown.\033[0m" << std::endl;
+        }
     }
 }
 
@@ -349,20 +376,11 @@ void tool_fini(void* user_data)
 static std::string generate_output_filename(std::string_view output_path, std::string_view suffix)
 {
     std::string filename{output_path};
-    if (filename.back() != '/')
+    if (filename.empty() || filename.back() != '/')
         filename += '/';
     filename += std::to_string(getpid());
     filename.append(suffix);
     return filename;
-}
-
-static std::string generate_fixed_output_path(std::string_view output_path, std::string_view filename)
-{
-    std::string path{output_path};
-    if (path.empty() || path.back() != '/')
-        path += '/';
-    path.append(filename);
-    return path;
 }
 
 std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
@@ -376,15 +394,18 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
     {
         const auto pc_mode = parse_pc_sampling_mode(
             std::string{g_input_parameters->get_pc_sampling_method()});
-        // PC sampling interval/unit are read here so they are available when the
-        // PC sampling service is configured on HSA load.
+        // PC sampling interval is read here so it is available when the PC
+        // sampling service is configured on HSA load.
         tool_data->pc_sampling_interval = std::string{g_input_parameters->get_pc_sampling_interval()};
-        tool_data->pc_sampling_unit = std::string{g_input_parameters->get_pc_sampling_unit()};
+        // PID-prefix the PC sampling outputs (like the counter CSV) so
+        // concurrent or multi-rank runs sharing one output dir do not clobber
+        // each other. NOTE: the analyze side must discover these by the
+        // "<pid>_ps_file_results.json" pattern rather than a fixed name.
         tool_data->pc_sampling =
             pc_sampling_feature_t{pc_mode,
                                   std::filesystem::path{output_path},
-                                  generate_fixed_output_path(output_path, "code_obj_info.json"),
-                                  generate_fixed_output_path(output_path, "ps_file_results.json")};
+                                  generate_output_filename(output_path, "_code_obj_info.json"),
+                                  generate_output_filename(output_path, "_ps_file_results.json")};
     }
 
     // ROCPROF_COUNTERS env. var. is a string like "pmc: counter1 counter2 ..."

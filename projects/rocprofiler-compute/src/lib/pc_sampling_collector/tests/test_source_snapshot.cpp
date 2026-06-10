@@ -59,7 +59,7 @@ TEST_F(test_source_snapshot_t, SnapshotSourceFiles_CopiesExistingFilesPreserving
 {
     const std::vector<std::string> refs{m_file_a.string(), m_file_b.string()};
 
-    const size_t copied = rocprofiler_compute_tool::snapshot_source_files(refs, m_output_root);
+    const size_t copied = rocprofiler_compute_tool::snapshot_source_files(refs, m_output_root, m_tmp_root);
 
     const auto code_obj_sources = m_output_root / "code_obj_sources";
     EXPECT_EQ(copied, 2u);
@@ -73,7 +73,8 @@ TEST_F(test_source_snapshot_t, SnapshotSourceFiles_SkipsMissingRefs)
     const std::vector<std::string> refs{m_file_a.string(), missing, m_file_b.string()};
 
     size_t copied = 0;
-    EXPECT_NO_THROW(copied = rocprofiler_compute_tool::snapshot_source_files(refs, m_output_root));
+    EXPECT_NO_THROW(
+        copied = rocprofiler_compute_tool::snapshot_source_files(refs, m_output_root, m_tmp_root));
 
     const auto code_obj_sources = m_output_root / "code_obj_sources";
     EXPECT_EQ(copied, 2u);
@@ -85,26 +86,63 @@ TEST_F(test_source_snapshot_t, SnapshotSourceFiles_DedupsDuplicateRefs)
 {
     const std::vector<std::string> refs{m_file_a.string(), m_file_a.string()};
 
-    const size_t copied = rocprofiler_compute_tool::snapshot_source_files(refs, m_output_root);
+    const size_t copied = rocprofiler_compute_tool::snapshot_source_files(refs, m_output_root, m_tmp_root);
 
     const auto code_obj_sources = m_output_root / "code_obj_sources";
     EXPECT_EQ(copied, 1u);
     EXPECT_TRUE(copied_somewhere_with_tail(code_obj_sources, m_file_a, m_contents_a));
 }
 
-TEST_F(test_source_snapshot_t, SnapshotSourceFiles_RefEscapingViaDotDot_IsRejected)
+TEST_F(test_source_snapshot_t, SnapshotSourceFiles_RefEscapingAllowedRootViaDotDot_IsRejected)
 {
-    // A pre-existing file outside the output root that a traversal ref would target.
+    // A pre-existing file OUTSIDE the allowed root that a traversal ref targets.
     const auto outside = m_tmp_root / "victim.txt";
     write_file(outside, "original\n");
 
-    // A ref that, joined under code_obj_sources/, would resolve back up to the
-    // victim via "..". snapshot_source_files must refuse it.
-    const auto traversal = (m_output_root / "code_obj_sources" / ".." / ".." / "victim.txt").string();
+    // allowed_root is the project subtree (m_tmp_root/proj). A ref that uses ".."
+    // to climb out of it to the victim must be refused: the resolved source lies
+    // outside allowed_root.
+    const auto allowed_root = m_tmp_root / "proj";
+    const auto traversal    = (allowed_root / ".." / "victim.txt").string();
 
     size_t copied = 0;
-    EXPECT_NO_THROW(copied = rocprofiler_compute_tool::snapshot_source_files({traversal}, m_output_root));
+    EXPECT_NO_THROW(copied = rocprofiler_compute_tool::snapshot_source_files({traversal},
+                                                                             m_output_root,
+                                                                             allowed_root));
 
     EXPECT_EQ(copied, 0u);
-    EXPECT_EQ(read_file(outside), "original\n");  // unchanged: not clobbered
+    EXPECT_EQ(read_file(outside), "original\n");  // unchanged: not read/copied
+}
+
+TEST_F(test_source_snapshot_t, SnapshotSourceFiles_RefOutsideAllowedRoot_IsRejected)
+{
+    // A real, existing file that lives OUTSIDE the allowed root. A hostile ISA
+    // comment naming an absolute path (e.g. /etc/passwd) must not be read/copied.
+    const auto outside = m_tmp_root / "secret.txt";
+    write_file(outside, "secret\n");
+
+    // allowed_root is m_tmp_root/proj, so a ref to m_tmp_root/secret.txt is out of bounds.
+    const auto allowed_root = m_tmp_root / "proj";
+
+    size_t copied = 0;
+    EXPECT_NO_THROW(copied = rocprofiler_compute_tool::snapshot_source_files({outside.string()},
+                                                                             m_output_root,
+                                                                             allowed_root));
+
+    EXPECT_EQ(copied, 0u);
+    // The out-of-root file is not copied anywhere under code_obj_sources.
+    EXPECT_FALSE(copied_somewhere_with_tail(m_output_root / "code_obj_sources", outside, "secret\n"));
+}
+
+TEST_F(test_source_snapshot_t, SnapshotSourceFiles_RefInsideAllowedRoot_IsCopied)
+{
+    // Sanity: a file inside the allowed root IS copied (m_file_a lives under proj/).
+    const auto allowed_root = m_tmp_root / "proj";
+
+    const size_t copied = rocprofiler_compute_tool::snapshot_source_files({m_file_a.string()},
+                                                                          m_output_root,
+                                                                          allowed_root);
+
+    EXPECT_EQ(copied, 1u);
+    EXPECT_TRUE(copied_somewhere_with_tail(m_output_root / "code_obj_sources", m_file_a, m_contents_a));
 }

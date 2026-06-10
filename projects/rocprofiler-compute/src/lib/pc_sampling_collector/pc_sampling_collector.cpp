@@ -11,7 +11,6 @@
 #include <iostream>
 #include <mutex>
 #include <optional>
-#include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -111,16 +110,13 @@ void pc_sampling_collector_impl_t::write_samples(pc_sample_writer_t& writer)
                                                        sample.pc.code_object_offset);
         const size_t        idx  = m_interner.intern(inst.name, inst.comment);
 
-        pc_sample_record_t s = sample;
-        s.inst_index         = idx;
-
-        switch (s.kind)
+        switch (sample.kind)
         {
         case pc_sample_kind_t::Stochastic:
-            writer.append_stochastic(s);
+            writer.append_stochastic(sample, idx);
             break;
         case pc_sample_kind_t::HostTrap:
-            writer.append_host_trap(s);
+            writer.append_host_trap(sample, idx);
             break;
         }
     }
@@ -132,27 +128,16 @@ void pc_sampling_collector_impl_t::write_samples(pc_sample_writer_t& writer)
 
 size_t pc_sampling_collector_impl_t::snapshot_sources(const std::filesystem::path& output_root)
 {
-    std::set<std::string> unique_refs;
-    for (const auto& id : m_translator->get_code_object_ids())
-    {
-        const auto& symbols = m_translator->get_symbols(id);
-        for (const auto& sym : symbols)
+    std::vector<std::string> refs;
+    for_each_instruction(
+        [&refs](uint64_t /*id*/, const symbol_t& /*sym*/, const instruction_t& inst)
         {
-            uint64_t       pc  = sym.virtual_address;
-            const uint64_t end = sym.virtual_address + sym.size;
-            while (pc < end)
+            if (const auto ref = parse_source_ref(inst.comment))
             {
-                const auto& inst = m_translator->get_instruction(id, pc);
-                Expects(inst.size);
-                if (const auto ref = parse_source_ref(inst.comment))
-                {
-                    unique_refs.insert(*ref);
-                }
-                pc += inst.size;
+                refs.push_back(*ref);
             }
-        }
-    }
+        });
 
-    const std::vector<std::string> refs(unique_refs.begin(), unique_refs.end());
+    // snapshot_source_files dedups internally, so no need to pre-unique here.
     return snapshot_source_files(refs, output_root);
 }

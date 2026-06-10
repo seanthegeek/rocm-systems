@@ -167,8 +167,12 @@ TEST_F(TestSdkCallbacks, ProvidedTracingRecord_ToolTracingCbReturnsKernelIdsFrom
 
 TEST_F(TestSdkCallbacks, ProvidedCodeObjectLoadWithPcSamplingEnabled_ForwardsToCollector)
 {
-    auto collector = std::make_shared<MockPcSamplingCollector>();
-    m_tool_data->pc_sampling = pc_sampling_feature_t{PcSamplingMode::HostTrap, "unused.json", collector};
+    auto collector           = std::make_shared<MockPcSamplingCollector>();
+    m_tool_data->pc_sampling = pc_sampling_feature_t{PcSamplingMode::HostTrap,
+                                                     "unused",
+                                                     "unused.json",
+                                                     "unused.json",
+                                                     collector};
 
     rocprofiler_callback_tracing_record_t                record  = {};
     rocprofiler_callback_tracing_code_object_load_data_t payload = {};

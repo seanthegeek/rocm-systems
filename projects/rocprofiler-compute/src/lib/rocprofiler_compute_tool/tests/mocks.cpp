@@ -56,19 +56,9 @@ std::string_view MockInputParameters::get_pc_sampling_interval()
     return std::string_view{m_pc_sampling_interval};
 }
 
-std::string_view MockInputParameters::get_pc_sampling_unit()
-{
-    return std::string_view{m_pc_sampling_unit};
-}
-
 void MockInputParameters::set_pc_sampling_interval(const std::string& interval)
 {
     m_pc_sampling_interval = interval;
-}
-
-void MockInputParameters::set_pc_sampling_unit(const std::string& unit)
-{
-    m_pc_sampling_unit = unit;
 }
 
 void MockInputParameters::set_pc_sampling_method(const std::string& method)
@@ -393,13 +383,6 @@ void MockPcSamplingCollector::add_kernel_symbol(uint64_t           code_object_i
                                                 const std::string& formatted_kernel_name)
 {
     added_kernel_symbols.emplace_back(code_object_id, formatted_kernel_name);
-}
-
-rocprofiler_compute_tool::instruction_t MockPcSamplingCollector::resolve_instruction(
-    uint64_t /*code_object_id*/,
-    uint64_t /*code_object_offset*/)
-{
-    return rocprofiler_compute_tool::instruction_t{};
 }
 
 void MockPcSamplingCollector::write_samples(rocprofiler_compute_tool::pc_sample_writer_t& /*writer*/)

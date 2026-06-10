@@ -4,6 +4,11 @@
 
 #include "nlohmann/json.hpp"
 
+#include <unistd.h>
+
+#include <filesystem>
+#include <fstream>
+
 // (a) top key "rocprofiler-sdk-tool" is a 1-element array.
 TEST_F(test_pc_sample_writer_t, ProvidedBegin_TopKeyIsSingleElementArray)
 {
@@ -22,7 +27,7 @@ TEST_F(test_pc_sample_writer_t, ProvidedStochasticRecord_SerializesUnderStochast
     const auto record = make_stochastic_record();
 
     m_writer.begin();
-    m_writer.append_stochastic(record);
+    m_writer.append_stochastic(record, record.inst_index);
 
     const auto  json       = nlohmann::json::parse(m_writer.get_result());
     const auto& root       = json["rocprofiler-sdk-tool"][0];
@@ -76,14 +81,19 @@ TEST_F(test_pc_sample_writer_t, ProvidedStochasticRecord_SerializesUnderStochast
     EXPECT_EQ(rec["wave_issued"], record.wave_issued);
     EXPECT_EQ(rec["wave_cnt"], record.wave_cnt);
 
-    // inst_type is a JSON string equal to the set value.
+    // inst_type is serialized as the SDK enum-name string for the raw value.
     ASSERT_TRUE(rec["inst_type"].is_string());
-    EXPECT_EQ(rec["inst_type"], record.inst_type);
+    EXPECT_EQ(rec["inst_type"],
+              rocprofiler_get_pc_sampling_instruction_type_name(
+                  static_cast<rocprofiler_pc_sampling_instruction_type_t>(record.inst_type)));
 
-    // snapshot.stall_reason is a JSON string equal to the set value.
+    // snapshot.stall_reason is serialized as the SDK enum-name string.
     const auto& snap = rec["snapshot"];
     ASSERT_TRUE(snap["stall_reason"].is_string());
-    EXPECT_EQ(snap["stall_reason"], record.snapshot.stall_reason);
+    EXPECT_EQ(snap["stall_reason"],
+              rocprofiler_get_pc_sampling_instruction_not_issued_reason_name(
+                  static_cast<rocprofiler_pc_sampling_instruction_not_issued_reason_t>(
+                      record.snapshot.stall_reason)));
     EXPECT_EQ(snap["dual_issue_valu"], record.snapshot.dual_issue_valu);
 
     EXPECT_EQ(snap["arb_state_issue_valu"], record.snapshot.arb_state_issue_valu);
@@ -116,7 +126,7 @@ TEST_F(test_pc_sample_writer_t, ProvidedHostTrapRecord_SerializesWithoutStochast
     const auto record = make_host_trap_record();
 
     m_writer.begin();
-    m_writer.append_host_trap(record);
+    m_writer.append_host_trap(record, record.inst_index);
 
     const auto  json      = nlohmann::json::parse(m_writer.get_result());
     const auto& root      = json["rocprofiler-sdk-tool"][0];
@@ -238,4 +248,65 @@ TEST_F(test_pc_sample_writer_t, ProvidedEmptyOutputFilePath_Throws)
 {
     m_writer.begin();
     EXPECT_THROW(m_writer.flush(""), std::runtime_error);
+}
+
+// (i) flush to an unwritable path throws (consistent I/O failure contract) and
+//     does not silently no-op. generate_output()'s finalize() wrapper catches
+//     this so the process never aborts.
+TEST_F(test_pc_sample_writer_t, ProvidedUnopenableOutputFilePath_Throws)
+{
+    m_writer.begin();
+    // A path whose "parent" is an existing regular file cannot be opened/created.
+    const auto tmp = std::filesystem::temp_directory_path() /
+                     ("rpc_pcw_" + std::to_string(::getpid()) + ".json");
+    {
+        std::ofstream ofs(tmp);
+        ofs << "x";
+    }
+    const auto unopenable = tmp / "child.json";  // tmp is a file, not a dir
+    EXPECT_THROW(m_writer.flush(unopenable), std::runtime_error);
+    std::error_code ec;
+    std::filesystem::remove(tmp, ec);
+}
+
+// (j) Cross-language contract: pin the exact key path the Python analyze side
+//     (analysis_db.calc_pc_sampling_data) reads, so a rename here fails loudly.
+TEST_F(test_pc_sample_writer_t, SerializesContractKeyPathConsumedByAnalyze)
+{
+    const auto stochastic = make_stochastic_record();
+    const auto host_trap  = make_host_trap_record();
+
+    rocprofiler_compute_tool::pc_string_interner_t interner;
+    const size_t                                   idx = interner.intern("v_add", "kernel.cpp:7");
+
+    m_writer.begin();
+    m_writer.append_stochastic(stochastic, idx);
+    m_writer.append_host_trap(host_trap, idx);
+    m_writer.set_strings(interner);
+    m_writer.set_kernel_symbols({{42, "my_kernel(int)"}});
+    m_writer.set_metadata(1234);
+
+    const auto json = nlohmann::json::parse(m_writer.get_result());
+
+    // rocprofiler-sdk-tool[0] -> the nested keys analyze depends on.
+    ASSERT_TRUE(json["rocprofiler-sdk-tool"].is_array());
+    const auto& root = json["rocprofiler-sdk-tool"][0];
+
+    ASSERT_TRUE(root["buffer_records"]["pc_sample_stochastic"].is_array());
+    ASSERT_TRUE(root["buffer_records"]["pc_sample_host_trap"].is_array());
+    ASSERT_TRUE(root["strings"]["pc_sample_instructions"].is_array());
+    ASSERT_TRUE(root["strings"]["pc_sample_comments"].is_array());
+    ASSERT_TRUE(root["kernel_symbols"].is_array());
+
+    // inst_index is a sibling of "record", referencing the string tables.
+    const auto& s_entry = root["buffer_records"]["pc_sample_stochastic"][0];
+    ASSERT_TRUE(s_entry.contains("record"));
+    ASSERT_TRUE(s_entry.contains("inst_index"));
+    EXPECT_EQ(s_entry["inst_index"], idx);
+    EXPECT_EQ(root["strings"]["pc_sample_instructions"][idx], "v_add");
+    EXPECT_EQ(root["strings"]["pc_sample_comments"][idx], "kernel.cpp:7");
+
+    const auto& k = root["kernel_symbols"][0];
+    EXPECT_EQ(k["code_object_id"], 42u);
+    EXPECT_EQ(k["formatted_kernel_name"], "my_kernel(int)");
 }
