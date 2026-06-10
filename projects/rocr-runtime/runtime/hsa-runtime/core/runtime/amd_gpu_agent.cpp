@@ -1777,7 +1777,16 @@ hsa_status_t GpuAgent::DmaCopySwap(const hsa_amd_memory_copy_op_t& op,
   if (blit_sdma->isSDMA()) {
     BlitSdmaBase* sdma_blit = static_cast<BlitSdmaBase*>((*blit_sdma).get());
     if (sdma_blit->SwapSupported()) {
-      // Use SDMA HW swap path via fan-out
+      // Single swap: convert scalar fields to single-entry lists
+      if (op.num_entries == 0) {
+        const void* src_list[1] = {op.src};
+        void* dst_list[1] = {op.dst};
+        hsa_agent_t dst_agents[1] = {op.dst_agent};
+        size_t sizes[1] = {op.src_size};
+        return DmaCopyFanOutOp(HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP, out_signal, dep_signals,
+                               1, src_list, dst_list, dst_agents, sizes);
+      }
+      // Multi-entry swap: use list fields directly
       return DmaCopyFanOutOp(HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP, out_signal, dep_signals,
                              op.num_entries, const_cast<const void* const*>(op.src_list),
                              op.dst_list, op.dst_agent_list, op.size_list);
