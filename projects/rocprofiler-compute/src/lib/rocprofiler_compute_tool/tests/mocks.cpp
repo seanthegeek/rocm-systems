@@ -392,5 +392,6 @@ void MockPcSamplingCollector::write_samples(rocprofiler_compute_tool::pc_sample_
 
 size_t MockPcSamplingCollector::snapshot_sources(const std::filesystem::path& /*output_root*/)
 {
+    ++snapshot_sources_count;
     return 0;
 }

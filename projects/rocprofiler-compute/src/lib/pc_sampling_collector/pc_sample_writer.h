@@ -10,9 +10,11 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -104,23 +106,26 @@ class pc_string_interner_t
 public:
     // Dedups by (instruction_text, comment); returns the shared index (position in BOTH arrays).
     size_t intern(const std::string& instruction_text, const std::string& comment);
-    const std::vector<std::string>& instructions() const;
-    const std::vector<std::string>& comments() const;
+    const std::deque<std::string>& instructions() const;
+    const std::deque<std::string>& comments() const;
 
 private:
-    struct pair_hash_t
+    struct view_pair_hash_t
     {
-        size_t operator()(const std::pair<std::string, std::string>& p) const
+        size_t operator()(const std::pair<std::string_view, std::string_view>& p) const
         {
-            const size_t h1 = std::hash<std::string>{}(p.first);
-            const size_t h2 = std::hash<std::string>{}(p.second);
+            const size_t h1 = std::hash<std::string_view>{}(p.first);
+            const size_t h2 = std::hash<std::string_view>{}(p.second);
             return h1 ^ (h2 + 0x9e3779b97f4a7c15ULL + (h1 << 6) + (h1 >> 2));
         }
     };
 
-    std::unordered_map<std::pair<std::string, std::string>, size_t, pair_hash_t> m_index;
-    std::vector<std::string>                                                     m_instructions;
-    std::vector<std::string>                                                     m_comments;
+    // Canonical strings are stored once in deques (stable element addresses, so
+    // the views below stay valid as more entries are appended); the index keys
+    // on views into that storage, so a cache hit allocates nothing.
+    std::deque<std::string> m_instructions;
+    std::deque<std::string> m_comments;
+    std::unordered_map<std::pair<std::string_view, std::string_view>, size_t, view_pair_hash_t> m_index;
 };
 
 // Returns std::nullopt when header.category != ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING

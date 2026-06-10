@@ -169,24 +169,26 @@ nlohmann::json stochastic_record_to_json(const pc_sample_record_t& r)
 
 size_t pc_string_interner_t::intern(const std::string& instruction_text, const std::string& comment)
 {
-    auto key = std::make_pair(instruction_text, comment);
-    auto it  = m_index.find(key);
-    if (it != m_index.end())
+    // Look up using views over the caller's strings so a cache hit copies nothing.
+    if (const auto it = m_index.find(
+            std::make_pair(std::string_view{instruction_text}, std::string_view{comment}));
+        it != m_index.end())
         return it->second;
 
-    size_t idx = m_instructions.size();
-    m_instructions.push_back(instruction_text);
-    m_comments.push_back(comment);
-    m_index.emplace(std::move(key), idx);
+    const size_t idx = m_instructions.size();
+    // deque element addresses are stable, so views into these stay valid.
+    const std::string& stored_text    = m_instructions.emplace_back(instruction_text);
+    const std::string& stored_comment = m_comments.emplace_back(comment);
+    m_index.emplace(std::make_pair(std::string_view{stored_text}, std::string_view{stored_comment}), idx);
     return idx;
 }
 
-const std::vector<std::string>& pc_string_interner_t::instructions() const
+const std::deque<std::string>& pc_string_interner_t::instructions() const
 {
     return m_instructions;
 }
 
-const std::vector<std::string>& pc_string_interner_t::comments() const
+const std::deque<std::string>& pc_string_interner_t::comments() const
 {
     return m_comments;
 }
@@ -295,8 +297,10 @@ void pc_sample_writer_json_t::append_host_trap(const pc_sample_record_t& r, size
 
 void pc_sample_writer_json_t::set_strings(const pc_string_interner_t& interner)
 {
-    m_instructions = interner.instructions();
-    m_comments     = interner.comments();
+    const auto& instructions = interner.instructions();
+    const auto& comments     = interner.comments();
+    m_instructions.assign(instructions.begin(), instructions.end());
+    m_comments.assign(comments.begin(), comments.end());
 }
 
 void pc_sample_writer_json_t::set_kernel_symbols(const std::vector<kernel_symbol_entry_t>& syms)

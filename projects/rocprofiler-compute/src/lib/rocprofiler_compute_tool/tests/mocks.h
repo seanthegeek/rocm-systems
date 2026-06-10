@@ -238,9 +238,10 @@ public:
     void   write_samples(rocprofiler_compute_tool::pc_sample_writer_t& writer) override;
     size_t snapshot_sources(const std::filesystem::path& output_root) override;
 
-    int                                                       load_count          = 0;
-    int                                                       append_sample_count = 0;
-    int                                                       write_samples_count = 0;
+    int                                                       load_count             = 0;
+    int                                                       append_sample_count    = 0;
+    int                                                       write_samples_count    = 0;
+    int                                                       snapshot_sources_count = 0;
     std::vector<rocprofiler_compute_tool::pc_sample_record_t> appended_samples;
     std::vector<std::pair<uint64_t, std::string>>             added_kernel_symbols;
 };

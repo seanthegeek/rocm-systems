@@ -38,7 +38,7 @@ public:
 private:
     bool                         m_enabled = false;
     PcSamplingMode               m_mode    = PcSamplingMode::Disabled;
-    std::filesystem::path        m_output_path;
+    std::filesystem::path        m_code_obj_path;
     std::filesystem::path        m_output_root;
     std::filesystem::path        m_pc_samples_path;
     pc_sampling_collector_t::ptr m_collector;

@@ -34,7 +34,7 @@ pc_sampling_feature_t::pc_sampling_feature_t(PcSamplingMode               mode,
                                              pc_sampling_collector_t::ptr collector)
     : m_enabled(true)
     , m_mode(mode)
-    , m_output_path(std::move(code_obj_path))
+    , m_code_obj_path(std::move(code_obj_path))
     , m_output_root(std::move(output_root))
     , m_pc_samples_path(std::move(pc_samples_path))
     , m_collector(std::move(collector))
@@ -61,7 +61,7 @@ void pc_sampling_feature_t::finalize()
 {
     code_object_writer_json_t writer;
     m_collector->write(writer);
-    writer.flush(m_output_path);
+    writer.flush(m_code_obj_path);
 
     pc_sample_writer_json_t pc_writer;
     m_collector->write_samples(pc_writer);
