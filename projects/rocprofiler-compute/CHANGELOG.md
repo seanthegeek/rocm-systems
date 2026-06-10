@@ -2,6 +2,7 @@
 
 Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/).
 
+
 ## ROCm Compute Profiler 3.7.0 for ROCm 7.14.0
 
 ### Added
@@ -12,8 +13,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added backward compatibility for live attach mode to work with older ROCm 7.x.x releases.
 
-* Added Roofline profiling and analysis support for gfx1151 architecture
-  * gfx11 supports Wave Matrix Multiply Accumulate (WMMA), replacing MFMA operations
+* Added support for GPU metrics on gfx1150 and gfx1152 hardware.
+
+* Added Roofline profiling and analysis support for gfx1151 architecture.
+  * gfx11 supports Wave Matrix Multiply Accumulate (WMMA), replacing MFMA operations.
 
 ### Changed
 
@@ -35,6 +38,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Unified accumulator handling across profile and analyze so each `_ACCUM`-suffixed counter is preserved instead of collapsing to `SQ_ACCUM_PREV_HIRES`
 
 * Reworded the N/A metric-evaluation warning to "divide-by-zero or empty counter data" (the prior "missing counter data" message could only fire for non-missing causes).
+
+* PC sampling in profile mode now opts in via the `--experimental --pc-sampling` option. Explicit `-b 21` / `--block 21` is no longer accepted on its own.
 
 ### Removed
 
