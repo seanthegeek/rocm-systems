@@ -134,6 +134,13 @@ set(TEST_tile_get_colmajor 115)
 set(TEST_tile_get_arbitrary 116)
 set(TEST_reduce_on_stream 117)
 set(TEST_host_ctx_create 118)
+set(TEST_teamsplit2d 119)
+set(TEST_tile_broadcast 120)
+set(TEST_tile_broadcast_wave 121)
+set(TEST_tile_broadcast_wg 122)
+set(TEST_tile_allgather 123)
+set(TEST_tile_allgather_wave 124)
+set(TEST_tile_allgather_wg 125)
 
 # MPI should already be found by the parent CMakeLists.txt
 # Use standard CMake MPI variables set by find_package(MPI)
@@ -948,6 +955,11 @@ function(add_coll_tests)
         add_rocshmem_functional_test(NAME fcollect RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
         add_rocshmem_functional_test(NAME teamreduction RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 32768)
     end_test_group()
+
+    # Team split 2D test - requires exactly 4 PEs
+    begin_test_group(CATEGORY "COLLECTIVE;TEAM" TIER comprehensive BACKENDS "all" GPUS "all")
+        add_rocshmem_functional_test(NAME teamsplit2d RANKS 4 WORKGROUPS 1 THREADS 1)
+    end_test_group()
 endfunction()
 
 # Stream Tests
@@ -1159,6 +1171,31 @@ function(add_tile_tests)
         add_rocshmem_functional_test(NAME tile_get_wave_contiguous RANKS 2 WORKGROUPS 1 THREADS 64)
         add_rocshmem_functional_test(NAME tile_get_wg_contiguous RANKS 2 WORKGROUPS 1 THREADS 1024)
         add_rocshmem_functional_test(NAME tile_get_wg_contiguous RANKS 2 WORKGROUPS 4 THREADS 1024)
+    end_test_group()
+
+    # Tile collective tests (broadcast and allgather)
+    begin_test_group(CATEGORY "TILE;COLLECTIVE;BROADCAST" TIER comprehensive BACKENDS "ipc" GPUS "all")
+        # Thread-level broadcast - test with 2 and 4 PEs
+        add_rocshmem_functional_test(NAME tile_broadcast RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME tile_broadcast RANKS 4 WORKGROUPS 1 THREADS 1)
+        # Wave-level broadcast
+        add_rocshmem_functional_test(NAME tile_broadcast_wave RANKS 2 WORKGROUPS 1 THREADS 64)
+        add_rocshmem_functional_test(NAME tile_broadcast_wave RANKS 4 WORKGROUPS 1 THREADS 64)
+        # Workgroup-level broadcast
+        add_rocshmem_functional_test(NAME tile_broadcast_wg RANKS 2 WORKGROUPS 1 THREADS 1024)
+        add_rocshmem_functional_test(NAME tile_broadcast_wg RANKS 4 WORKGROUPS 1 THREADS 1024)
+    end_test_group()
+
+    begin_test_group(CATEGORY "TILE;COLLECTIVE;ALLGATHER" TIER comprehensive BACKENDS "ipc" GPUS "all")
+        # Thread-level allgather - test with 2 and 4 PEs
+        add_rocshmem_functional_test(NAME tile_allgather RANKS 2 WORKGROUPS 1 THREADS 1)
+        add_rocshmem_functional_test(NAME tile_allgather RANKS 4 WORKGROUPS 1 THREADS 1)
+        # Wave-level allgather
+        add_rocshmem_functional_test(NAME tile_allgather_wave RANKS 2 WORKGROUPS 1 THREADS 64)
+        add_rocshmem_functional_test(NAME tile_allgather_wave RANKS 4 WORKGROUPS 1 THREADS 64)
+        # Workgroup-level allgather
+        add_rocshmem_functional_test(NAME tile_allgather_wg RANKS 2 WORKGROUPS 1 THREADS 1024)
+        add_rocshmem_functional_test(NAME tile_allgather_wg RANKS 4 WORKGROUPS 1 THREADS 1024)
     end_test_group()
 endfunction()
 

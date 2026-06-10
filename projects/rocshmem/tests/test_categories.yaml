@@ -145,6 +145,7 @@ test_categories:
       - "teamwgbarrier_.*"
       - "teamwavesync_.*"
       - "teamwgsync_.*"
+      - "teamsplit2d_.*"
 
       # Extended signal operations
       - "wgputsignal_.*"
@@ -184,6 +185,10 @@ test_categories:
       # Tile RMA tests (2D/strided operations, IPC-only)
       - "tile_put_.*"
       - "tile_get_.*"
+
+      # Tile collective tests (IPC-only)
+      - "tile_broadcast_.*"
+      - "tile_allgather_.*"
 
     labels:
       - "nightly"
