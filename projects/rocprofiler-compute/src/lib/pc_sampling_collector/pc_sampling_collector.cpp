@@ -13,9 +13,24 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 using namespace rocprofiler_compute_tool;
+
+namespace
+{
+struct pc_location_hash_t
+{
+    size_t operator()(const std::pair<uint64_t, uint64_t>& p) const
+    {
+        const size_t h1 = std::hash<uint64_t>{}(p.first);
+        const size_t h2 = std::hash<uint64_t>{}(p.second);
+        return h1 ^ (h2 + 0x9e3779b97f4a7c15ULL + (h1 << 6) + (h1 >> 2));
+    }
+};
+}  // namespace
 
 pc_sampling_collector_t::ptr pc_sampling_collector_t::create()
 {
@@ -104,11 +119,25 @@ void pc_sampling_collector_impl_t::write_samples(pc_sample_writer_t& writer)
     std::lock_guard<std::mutex> lock(m_mutex);
 
     writer.begin();
+    // PC sampling concentrates many samples on the same instruction, so cache
+    // the interned index per (code_object_id, code_object_offset) to avoid
+    // re-disassembling and re-interning the same PC for every sample.
+    std::unordered_map<std::pair<uint64_t, uint64_t>, size_t, pc_location_hash_t> idx_by_location;
     for (const auto& sample : m_samples)
     {
-        const instruction_t inst = resolve_instruction(sample.pc.code_object_id,
-                                                       sample.pc.code_object_offset);
-        const size_t        idx  = m_interner.intern(inst.name, inst.comment);
+        const auto location = std::make_pair(sample.pc.code_object_id, sample.pc.code_object_offset);
+        size_t idx = 0;
+        if (const auto it = idx_by_location.find(location); it != idx_by_location.end())
+        {
+            idx = it->second;
+        }
+        else
+        {
+            const instruction_t inst = resolve_instruction(sample.pc.code_object_id,
+                                                           sample.pc.code_object_offset);
+            idx                      = m_interner.intern(inst.name, inst.comment);
+            idx_by_location.emplace(location, idx);
+        }
 
         switch (sample.kind)
         {

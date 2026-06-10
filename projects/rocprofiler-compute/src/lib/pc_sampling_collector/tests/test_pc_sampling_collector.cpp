@@ -4,6 +4,12 @@
 
 #include "nlohmann/json.hpp"
 
+#include <unistd.h>
+
+#include <filesystem>
+#include <fstream>
+#include <string>
+
 using namespace rocprofiler_compute_tool;
 
 TEST_F(test_pc_sampling_collector_t, ProvidedFileCodeObject_PassesItToDecode)
@@ -121,6 +127,90 @@ TEST_F(test_pc_sampling_collector_t, WriteSamples_InternsAndRoutesByKind)
     ASSERT_EQ(root["strings"]["pc_sample_instructions"].size(), 1u);
     EXPECT_EQ(root["strings"]["pc_sample_instructions"][0], "v_add");
     EXPECT_EQ(root["strings"]["pc_sample_comments"][0], "kernel.cpp:7");
+}
+
+TEST_F(test_pc_sampling_collector_t, WriteSamples_TranslatesOffsetByLoadBase)
+{
+    m_pc_sampling_collector->on_code_object_load(m_mem_info);
+    m_translator->add_instruction({"v_add", "kernel.cpp:7", 0x1000, 0x10, 4});
+
+    pc_sample_record_t sample{};
+    sample.kind                  = pc_sample_kind_t::HostTrap;
+    sample.pc.code_object_id     = m_mem_info.code_object_id;
+    sample.pc.code_object_offset = 0x40;
+    m_pc_sampling_collector->append_sample(sample);
+
+    pc_sample_writer_json_t writer;
+    m_pc_sampling_collector->write_samples(writer);
+
+    // The PC offset (0x40) must be translated to a virtual address by adding the
+    // code object's load base (0x1000) before instruction lookup.
+    const auto& queries = m_translator->get_instruction_queries();
+    ASSERT_EQ(queries.size(), 1u);
+    EXPECT_EQ(queries[0].first, m_mem_info.code_object_id);
+    EXPECT_EQ(queries[0].second, 0x40u + m_mem_info.load_base);
+}
+
+TEST_F(test_pc_sampling_collector_t, WriteSamples_UnresolvedPcInternsEmptyInstruction)
+{
+    m_pc_sampling_collector->on_code_object_load(m_mem_info);
+    m_translator->add_instruction({"v_add", "kernel.cpp:7", 0x1000, 0x10, 4});
+
+    // A PC whose translated virtual address has no decoded instruction: the
+    // translator throws std::out_of_range and the sample degrades to an empty
+    // (instruction, comment) entry instead of aborting serialization.
+    const uint64_t offset = 0x40;
+    m_translator->throw_for_virtual_address(offset + m_mem_info.load_base);
+
+    pc_sample_record_t sample{};
+    sample.kind                  = pc_sample_kind_t::HostTrap;
+    sample.pc.code_object_id     = m_mem_info.code_object_id;
+    sample.pc.code_object_offset = offset;
+    m_pc_sampling_collector->append_sample(sample);
+
+    pc_sample_writer_json_t writer;
+    EXPECT_NO_THROW(m_pc_sampling_collector->write_samples(writer));
+
+    const auto  json = nlohmann::json::parse(writer.get_result());
+    const auto& root = json["rocprofiler-sdk-tool"][0];
+
+    ASSERT_EQ(root["buffer_records"]["pc_sample_host_trap"].size(), 1u);
+    EXPECT_EQ(root["buffer_records"]["pc_sample_host_trap"][0]["inst_index"], 0);
+    ASSERT_EQ(root["strings"]["pc_sample_instructions"].size(), 1u);
+    EXPECT_EQ(root["strings"]["pc_sample_instructions"][0], "");
+    EXPECT_EQ(root["strings"]["pc_sample_comments"][0], "");
+}
+
+TEST_F(test_pc_sampling_collector_t, SnapshotSources_CopiesSourcesParsedFromInstructionComments)
+{
+    namespace fs = std::filesystem;
+
+    // snapshot_sources resolves refs against the current working directory, so
+    // the source file must live under CWD to be inside the allowed root.
+    const fs::path rel_dir = fs::path{"rpc_snapshot_sources_test_" + std::to_string(::getpid())};
+    const fs::path rel_src = rel_dir / "kernel.cpp";
+    fs::create_directories(rel_dir);
+    {
+        std::ofstream ofs(rel_src);
+        ofs << "source contents\n";
+    }
+    const fs::path out_root = fs::temp_directory_path() /
+                              ("rpc_snapshot_out_" + std::to_string(::getpid()));
+
+    m_pc_sampling_collector->on_code_object_load(m_mem_info);
+    const std::vector<symbol_t> symbols = {{"name0", 0x10, 0x1000, 1}};
+    m_translator->add_symbols(m_mem_info.code_object_id, symbols);
+    // for_each_instruction visits this instruction; its comment parses to rel_src.
+    m_translator->add_instruction({"v_add", rel_src.string() + ":7", 0x1000, 0x10, 1});
+
+    const size_t copied = m_pc_sampling_collector->snapshot_sources(out_root);
+
+    EXPECT_EQ(copied, 1u);
+    EXPECT_TRUE(fs::exists(out_root / "code_obj_sources" / rel_dir / "kernel.cpp"));
+
+    std::error_code ec;
+    fs::remove_all(rel_dir, ec);
+    fs::remove_all(out_root, ec);
 }
 
 void test_pc_sampling_collector_t::SetUp()
