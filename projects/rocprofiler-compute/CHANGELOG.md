@@ -40,6 +40,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * PC sampling in profile mode now opts in via the `--experimental --pc-sampling` option. Explicit `-b 21` / `--block 21` is no longer accepted on its own.
 
+* Improved vL1D Cache Hit and vL1D Cache Hit Rate metric equations to more accurately reflect vL1 cache behavior on MI300/MI350.
+
 ### Removed
 
 * ``--path`` and ``--subpath`` options have been removed from profile mode. Use ``--output-directory`` instead.
