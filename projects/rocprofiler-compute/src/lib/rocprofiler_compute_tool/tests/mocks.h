@@ -26,7 +26,6 @@ public:
     std::string_view get_pc_sampling_method() override;
     std::string_view get_pc_sampling_beta_enabled() override;
     std::string_view get_pc_sampling_interval() override;
-    std::string_view get_pc_sampling_unit() override;
 
     void set_output_path(const std::string& output_path);
     void set_requested_counters(const std::string& counters);
@@ -36,7 +35,6 @@ public:
     void set_pc_sampling_method(const std::string& method);
     void set_pc_sampling_beta_enabled(const std::string& value);
     void set_pc_sampling_interval(const std::string& interval);
-    void set_pc_sampling_unit(const std::string& unit);
 
     void unset_output_path();
     void unset_requested_counters();
@@ -54,7 +52,6 @@ private:
     std::string m_pc_sampling_method;
     std::string m_pc_sampling_beta_enabled;
     std::string m_pc_sampling_interval;
-    std::string m_pc_sampling_unit;
 
     bool m_output_path_set                 = true;
     bool m_requested_counters_set          = true;
@@ -238,8 +235,6 @@ public:
 
     void append_sample(const rocprofiler_compute_tool::pc_sample_record_t& record) override;
     void add_kernel_symbol(uint64_t code_object_id, const std::string& formatted_kernel_name) override;
-    rocprofiler_compute_tool::instruction_t resolve_instruction(uint64_t code_object_id,
-                                                                uint64_t code_object_offset) override;
     void   write_samples(rocprofiler_compute_tool::pc_sample_writer_t& writer) override;
     size_t snapshot_sources(const std::filesystem::path& output_root) override;
 

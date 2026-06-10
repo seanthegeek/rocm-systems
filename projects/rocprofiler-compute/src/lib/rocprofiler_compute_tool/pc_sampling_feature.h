@@ -14,10 +14,6 @@ class pc_sampling_feature_t
 {
 public:
     pc_sampling_feature_t() = default;
-    pc_sampling_feature_t(PcSamplingMode mode, std::filesystem::path output_path);
-    pc_sampling_feature_t(PcSamplingMode               mode,
-                          std::filesystem::path        output_path,
-                          pc_sampling_collector_t::ptr collector);
     pc_sampling_feature_t(PcSamplingMode        mode,
                           std::filesystem::path output_root,
                           std::filesystem::path code_obj_path,
@@ -32,17 +28,10 @@ public:
 
     PcSamplingMode mode() const { return m_mode; }
 
-    const std::filesystem::path& output_path() const { return m_output_path; }
-
-    const std::filesystem::path& output_root() const { return m_output_root; }
-
-    const std::filesystem::path& pc_samples_path() const { return m_pc_samples_path; }
-
     void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info);
 
     void append_sample(const pc_sample_record_t& record);
     void add_kernel_symbol(uint64_t code_object_id, const std::string& formatted_kernel_name);
-    instruction_t resolve_instruction(uint64_t code_object_id, uint64_t code_object_offset);
 
     void finalize();
 

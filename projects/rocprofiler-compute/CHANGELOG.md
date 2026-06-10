@@ -6,9 +6,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
-* Added native PC sampling collection to the rocprof-compute tool library. When `ROCPROFILER_PC_SAMPLING_BETA_ENABLED` is set, the collector captures stochastic and host-trap PC samples on every supporting GPU agent and writes them to `ps_file_results.json` in the rocprofiler-sdk-tool JSON format consumed by the analysis flow.
-  * Snapshots the source files referenced by the collected ISA into a `code_obj_sources/` directory, and writes code-object metadata to `code_obj_info.json`.
-  * Adds `ROCPROF_PC_SAMPLING_INTERVAL` and `ROCPROF_PC_SAMPLING_UNIT` environment variables to control the sampling rate; GPU agents that do not support the requested method emit a warning and are skipped without affecting counter collection.
+* Added native PC sampling collection to the rocprof-compute tool library. When ``ROCPROFILER_PC_SAMPLING_BETA_ENABLED`` is set, the collector captures stochastic and host-trap PC samples on every supporting GPU agent and writes them to ``ps_file_results.json`` in the rocprofiler-sdk-tool JSON format consumed by the analysis flow.
+  * Snapshots the source files referenced by the collected ISA into a ``code_obj_sources/`` directory, and writes code-object metadata to ``code_obj_info.json``.
+  * Adds the ``ROCPROF_PC_SAMPLING_INTERVAL`` environment variable to control the sampling rate; GPU agents that do not support the requested method emit a warning and are skipped without affecting counter collection.
 
 ### Changed
 

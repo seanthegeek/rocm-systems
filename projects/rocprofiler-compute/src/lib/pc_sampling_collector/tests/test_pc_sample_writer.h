@@ -5,6 +5,8 @@
 #include "gtest/gtest.h"
 #include "pc_sample_writer.h"
 
+#include <rocprofiler-sdk/pc_sampling.h>
+
 class test_pc_sample_writer_t : public ::testing::Test
 {
 protected:
@@ -45,10 +47,10 @@ protected:
 
         r.wave_in_grp = 2;
         r.wave_issued = 1;
-        r.inst_type   = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_VALU";
+        r.inst_type   = ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_VALU;
         r.wave_cnt    = 27;
 
-        r.snapshot.stall_reason = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_WAITCNT";
+        r.snapshot.stall_reason    = ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_WAITCNT;
         r.snapshot.dual_issue_valu = 1;
 
         r.snapshot.arb_state_issue_valu       = 1;

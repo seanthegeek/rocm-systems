@@ -24,7 +24,8 @@ std::optional<std::string> rocprofiler_compute_tool::parse_source_ref(const std:
 }
 
 size_t rocprofiler_compute_tool::snapshot_source_files(const std::vector<std::string>& source_refs,
-                                                       const std::filesystem::path&    output_root)
+                                                       const std::filesystem::path&    output_root,
+                                                       const std::filesystem::path&    allowed_root)
 {
     const std::filesystem::path sources_root = output_root / "code_obj_sources";
 
@@ -34,12 +35,33 @@ size_t rocprofiler_compute_tool::snapshot_source_files(const std::vector<std::st
         unique_refs.insert(ref);
     }
 
+    // Source refs come from ISA debug comments of the profiled binary, so they
+    // are untrusted. Only read files that resolve inside allowed_root (the
+    // project tree), and only write inside code_obj_sources.
+    std::error_code root_ec;
+    const auto      canon_allowed_root = std::filesystem::weakly_canonical(allowed_root, root_ec);
+    const auto      canon_sources_root = std::filesystem::weakly_canonical(sources_root, root_ec);
+
+    const auto is_inside = [](const std::filesystem::path& base, const std::filesystem::path& candidate)
+    {
+        const auto rel = candidate.lexically_relative(base);
+        return !rel.empty() && *rel.begin() != "..";
+    };
+
     size_t copied = 0;
     for (const auto& ref : unique_refs)
     {
         std::error_code             ec;
         const std::filesystem::path src{ref};
-        if (!std::filesystem::exists(src, ec) || ec)
+
+        // Resolve the source (following any symlinks) and require it to live
+        // inside the project tree, rejecting absolute escapes like /etc/passwd.
+        const auto canon_src = std::filesystem::weakly_canonical(src, ec);
+        if (ec || canon_allowed_root.empty() || !is_inside(canon_allowed_root, canon_src))
+        {
+            continue;
+        }
+        if (!std::filesystem::is_regular_file(canon_src, ec) || ec)
         {
             continue;
         }
@@ -53,14 +75,13 @@ size_t rocprofiler_compute_tool::snapshot_source_files(const std::vector<std::st
 
         const std::filesystem::path dst = sources_root / relative;
 
-        // Reject refs that escape code_obj_sources (e.g. via "..") so that a
-        // hostile ref cannot clobber files outside the snapshot directory.
-        const auto norm_root = sources_root.lexically_normal();
-        const auto norm_dst  = dst.lexically_normal();
-        const auto rel       = norm_dst.lexically_relative(norm_root);
-        if (rel.empty() || *rel.begin() == "..")
+        // Reject refs whose destination escapes code_obj_sources, resolving
+        // symlinks on the existing prefix so a planted symlink cannot redirect
+        // the write outside the snapshot directory.
+        const auto canon_dst_parent = std::filesystem::weakly_canonical(dst.parent_path(), ec);
+        if (ec || canon_sources_root.empty() || !is_inside(canon_sources_root, canon_dst_parent))
         {
-            continue;  // ref escapes code_obj_sources; skip it
+            continue;
         }
 
         std::filesystem::create_directories(dst.parent_path(), ec);
@@ -69,9 +90,10 @@ size_t rocprofiler_compute_tool::snapshot_source_files(const std::vector<std::st
             continue;
         }
 
-        const bool ok = std::filesystem::copy_file(src,
+        // skip_existing avoids following/clobbering a pre-planted destination.
+        const bool ok = std::filesystem::copy_file(canon_src,
                                                    dst,
-                                                   std::filesystem::copy_options::overwrite_existing,
+                                                   std::filesystem::copy_options::skip_existing,
                                                    ec);
         if (ok && !ec)
         {

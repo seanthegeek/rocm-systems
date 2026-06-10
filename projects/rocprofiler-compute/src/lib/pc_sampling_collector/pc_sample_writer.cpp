@@ -7,6 +7,7 @@
 #include "pc_sample_writer.h"
 
 #include "gsl_assert.h"
+#include "json_file_io.h"
 #include "nlohmann/json.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
@@ -113,7 +114,7 @@ nlohmann::json dim3_to_json(const pc_sample_dim3_t& d)
 nlohmann::json snapshot_to_json(const pc_sample_snapshot_t& s)
 {
     return nlohmann::json::object({
-        {"stall_reason", s.stall_reason},
+        {"stall_reason", not_issued_reason_name(s.stall_reason)},
         {"dual_issue_valu", s.dual_issue_valu},
         {"arb_state_issue_valu", s.arb_state_issue_valu},
         {"arb_state_issue_matrix", s.arb_state_issue_matrix},
@@ -138,10 +139,10 @@ nlohmann::json snapshot_to_json(const pc_sample_snapshot_t& s)
     });
 }
 
-nlohmann::json stochastic_record_to_json(const pc_sample_record_t& r)
+// Fields shared by both record kinds; host-trap samples emit exactly these.
+nlohmann::json common_record_to_json(const pc_sample_record_t& r)
 {
     return nlohmann::json::object({
-        {"flags", nlohmann::json::object({{"has_mem_cnt", r.flags.has_mem_cnt}})},
         {"hw_id", hw_id_to_json(r.hw_id)},
         {"pc", pc_to_json(r.pc)},
         {"exec_mask", r.exec_mask},
@@ -150,25 +151,19 @@ nlohmann::json stochastic_record_to_json(const pc_sample_record_t& r)
         {"corr_id", corr_to_json(r.corr_id)},
         {"wrkgrp_id", dim3_to_json(r.wrkgrp_id)},
         {"wave_in_grp", r.wave_in_grp},
-        {"wave_issued", r.wave_issued},
-        {"inst_type", r.inst_type},
-        {"wave_cnt", r.wave_cnt},
-        {"snapshot", snapshot_to_json(r.snapshot)},
     });
 }
 
-nlohmann::json host_trap_record_to_json(const pc_sample_record_t& r)
+nlohmann::json stochastic_record_to_json(const pc_sample_record_t& r)
 {
-    return nlohmann::json::object({
-        {"hw_id", hw_id_to_json(r.hw_id)},
-        {"pc", pc_to_json(r.pc)},
-        {"exec_mask", r.exec_mask},
-        {"timestamp", r.timestamp},
-        {"dispatch_id", r.dispatch_id},
-        {"corr_id", corr_to_json(r.corr_id)},
-        {"wrkgrp_id", dim3_to_json(r.wrkgrp_id)},
-        {"wave_in_grp", r.wave_in_grp},
-    });
+    // Stochastic adds flags + the stochastic-only fields on top of the common base.
+    auto out           = common_record_to_json(r);
+    out["flags"]       = nlohmann::json::object({{"has_mem_cnt", r.flags.has_mem_cnt}});
+    out["wave_issued"] = r.wave_issued;
+    out["inst_type"]   = instruction_type_name(r.inst_type);
+    out["wave_cnt"]    = r.wave_cnt;
+    out["snapshot"]    = snapshot_to_json(r.snapshot);
+    return out;
 }
 }  // namespace
 
@@ -196,6 +191,26 @@ const std::vector<std::string>& pc_string_interner_t::comments() const
     return m_comments;
 }
 
+namespace
+{
+// Maps the fields common to both stochastic and host-trap SDK records. Both
+// structs expose these members by the same names, so a template avoids
+// duplicating the mapping across the two decode branches.
+template<typename RecT>
+void map_common_fields(pc_sample_record_t& out, const RecT& rec)
+{
+    out.hw_id            = map_hw_id(rec.hw_id);
+    out.pc               = map_pc(rec.pc);
+    out.exec_mask        = rec.exec_mask;
+    out.timestamp        = rec.timestamp;
+    out.dispatch_id      = rec.dispatch_id;
+    out.corr_id.internal = rec.correlation_id.internal;
+    out.corr_id.external = rec.correlation_id.external.value;
+    out.wrkgrp_id        = map_dim3(rec.workgroup_id);
+    out.wave_in_grp      = rec.wave_in_group;
+}
+}  // namespace
+
 std::optional<pc_sample_record_t> rocprofiler_compute_tool::decode_pc_sample_record(
     const rocprofiler_record_header_t& header)
 {
@@ -208,24 +223,16 @@ std::optional<pc_sample_record_t> rocprofiler_compute_tool::decode_pc_sample_rec
             header.payload);
 
         pc_sample_record_t out{};
-        out.kind              = pc_sample_kind_t::Stochastic;
+        out.kind = pc_sample_kind_t::Stochastic;
+        map_common_fields(out, rec);
         out.flags.has_mem_cnt = rec.flags.has_memory_counter;
-        out.hw_id             = map_hw_id(rec.hw_id);
-        out.pc                = map_pc(rec.pc);
-        out.exec_mask         = rec.exec_mask;
-        out.timestamp         = rec.timestamp;
-        out.dispatch_id       = rec.dispatch_id;
-        out.corr_id.internal  = rec.correlation_id.internal;
-        out.corr_id.external  = rec.correlation_id.external.value;
-        out.wrkgrp_id         = map_dim3(rec.workgroup_id);
-        out.wave_in_grp       = rec.wave_in_group;
         out.wave_issued       = rec.wave_issued;
-        out.inst_type         = instruction_type_name(rec.inst_type);
+        out.inst_type         = rec.inst_type;
         out.wave_cnt          = rec.wave_count;
 
-        out.snapshot.stall_reason         = not_issued_reason_name(rec.snapshot.reason_not_issued);
-        out.snapshot.dual_issue_valu      = rec.snapshot.dual_issue_valu;
-        out.snapshot.arb_state_issue_valu = rec.snapshot.arb_state_issue_valu;
+        out.snapshot.stall_reason               = rec.snapshot.reason_not_issued;
+        out.snapshot.dual_issue_valu            = rec.snapshot.dual_issue_valu;
+        out.snapshot.arb_state_issue_valu       = rec.snapshot.arb_state_issue_valu;
         out.snapshot.arb_state_issue_matrix     = rec.snapshot.arb_state_issue_matrix;
         out.snapshot.arb_state_issue_lds        = rec.snapshot.arb_state_issue_lds;
         out.snapshot.arb_state_issue_lds_direct = rec.snapshot.arb_state_issue_lds_direct;
@@ -255,16 +262,8 @@ std::optional<pc_sample_record_t> rocprofiler_compute_tool::decode_pc_sample_rec
             header.payload);
 
         pc_sample_record_t out{};
-        out.kind             = pc_sample_kind_t::HostTrap;
-        out.hw_id            = map_hw_id(rec.hw_id);
-        out.pc               = map_pc(rec.pc);
-        out.exec_mask        = rec.exec_mask;
-        out.timestamp        = rec.timestamp;
-        out.dispatch_id      = rec.dispatch_id;
-        out.corr_id.internal = rec.correlation_id.internal;
-        out.corr_id.external = rec.correlation_id.external.value;
-        out.wrkgrp_id        = map_dim3(rec.workgroup_id);
-        out.wave_in_grp      = rec.wave_in_group;
+        out.kind = pc_sample_kind_t::HostTrap;
+        map_common_fields(out, rec);
 
         return out;
     }
@@ -282,14 +281,16 @@ void pc_sample_writer_json_t::begin()
     m_kernel_symbols.clear();
 }
 
-void pc_sample_writer_json_t::append_stochastic(const pc_sample_record_t& r)
+void pc_sample_writer_json_t::append_stochastic(const pc_sample_record_t& r, size_t inst_index)
 {
     m_stochastic.push_back(r);
+    m_stochastic.back().inst_index = inst_index;
 }
 
-void pc_sample_writer_json_t::append_host_trap(const pc_sample_record_t& r)
+void pc_sample_writer_json_t::append_host_trap(const pc_sample_record_t& r, size_t inst_index)
 {
     m_host_trap.push_back(r);
+    m_host_trap.back().inst_index = inst_index;
 }
 
 void pc_sample_writer_json_t::set_strings(const pc_string_interner_t& interner)
@@ -323,7 +324,7 @@ std::string pc_sample_writer_json_t::get_result()
     for (const auto& r : m_host_trap)
     {
         host_trap_records.push_back(nlohmann::json::object({
-            {"record", host_trap_record_to_json(r)},
+            {"record", common_record_to_json(r)},
             {"inst_index", r.inst_index},
         }));
     }
@@ -380,28 +381,9 @@ std::string pc_sample_writer_json_t::get_result()
 
 void pc_sample_writer_json_t::flush(const std::filesystem::path& output_file_path)
 {
-    Expects(!output_file_path.empty());
-    create_parent_dir(output_file_path);
-
-    std::ofstream out_file(output_file_path, std::ios::out);
-    if (!out_file.is_open())
-    {
-        std::cerr << "Failed to open output file: " << output_file_path << "\n";
-        return;
-    }
-    out_file << get_result();
+    // write_json_to_file throws on any I/O failure; generate_output()'s
+    // finalize() wrapper catches it so a failed write never aborts shutdown.
+    write_json_to_file(output_file_path, get_result());
     std::clog << "[rocprofiler-compute] [" << __FUNCTION__
               << "] PC sampling data has been written to: " << output_file_path << "\n";
-}
-
-void pc_sample_writer_json_t::create_parent_dir(const std::filesystem::path& output_file_path)
-{
-    Expects(output_file_path.has_parent_path());
-    std::error_code error;
-    std::filesystem::create_directories(output_file_path.parent_path(), error);
-    if (error)
-    {
-        throw std::runtime_error("Failed to create output directory: " + output_file_path.string() +
-                                 ", error: " + error.message());
-    }
 }

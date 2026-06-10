@@ -3,8 +3,8 @@
 #include "code_object_writer.h"
 
 #include "gsl_assert.h"
+#include "json_file_io.h"
 
-#include <fstream>
 #include <iostream>
 
 using namespace rocprofiler_compute_tool;
@@ -76,28 +76,7 @@ std::string code_object_writer_json_t::get_result()
 
 void code_object_writer_json_t::flush(const std::filesystem::path& output_file_path)
 {
-    Expects(!output_file_path.empty());
-    create_parent_dir(output_file_path);
-
-    std::ofstream out_file(output_file_path, std::ios::out);
-    if (!out_file.is_open())
-    {
-        std::cerr << "Failed to open output file: " << output_file_path << "\n";
-        return;
-    }
-    out_file << get_result();
+    write_json_to_file(output_file_path, get_result());
     std::clog << "[rocprofiler-compute] [" << __FUNCTION__
               << "] Code object data has been written to: " << output_file_path << "\n";
-}
-
-void code_object_writer_json_t::create_parent_dir(const std::filesystem::path& output_file_path)
-{
-    Expects(output_file_path.has_parent_path());
-    std::error_code error;
-    std::filesystem::create_directories(output_file_path.parent_path(), error);
-    if (error)
-    {
-        throw std::runtime_error("Failed to create output directory: " + output_file_path.string() +
-                                 ", error: " + error.message());
-    }
 }

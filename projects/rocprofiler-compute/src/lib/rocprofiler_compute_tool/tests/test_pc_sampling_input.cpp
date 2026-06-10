@@ -21,22 +21,20 @@ using namespace rocprofiler_compute_tool;
 
 //////////////////////////////////////////////////////////////////////////
 /// (a) ENV READ
-TEST_F(TestPcSamplingInput, EnvInputParameters_PcSamplingIntervalAndUnit_ReturnInjectedValues)
+TEST_F(TestPcSamplingInput, EnvInputParameters_PcSamplingInterval_ReturnInjectedValue)
 {
-    Envp envp{{"ROCPROF_PC_SAMPLING_INTERVAL=1048576", "ROCPROF_PC_SAMPLING_UNIT=cycles"}};
+    Envp               envp{{"ROCPROF_PC_SAMPLING_INTERVAL=1048576"}};
     EnvInputParameters input_parameters{std::make_shared<EnvironCache>(envp.data())};
 
     EXPECT_EQ(input_parameters.get_pc_sampling_interval(), std::string_view{"1048576"});
-    EXPECT_EQ(input_parameters.get_pc_sampling_unit(), std::string_view{"cycles"});
 }
 
-TEST_F(TestPcSamplingInput, EnvInputParameters_PcSamplingIntervalAndUnitUnset_ReturnEmpty)
+TEST_F(TestPcSamplingInput, EnvInputParameters_PcSamplingIntervalUnset_ReturnEmpty)
 {
     Envp               envp{{}};
     EnvInputParameters input_parameters{std::make_shared<EnvironCache>(envp.data())};
 
     EXPECT_EQ(input_parameters.get_pc_sampling_interval(), std::string_view{""});
-    EXPECT_EQ(input_parameters.get_pc_sampling_unit(), std::string_view{""});
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -47,16 +45,9 @@ TEST_F(TestPcSamplingInput, MockInputParameters_SetPcSamplingInterval_RoundTrips
     EXPECT_EQ(m_input_parameters->get_pc_sampling_interval(), std::string_view{"256"});
 }
 
-TEST_F(TestPcSamplingInput, MockInputParameters_SetPcSamplingUnit_RoundTrips)
-{
-    m_input_parameters->set_pc_sampling_unit("cycles");
-    EXPECT_EQ(m_input_parameters->get_pc_sampling_unit(), std::string_view{"cycles"});
-}
-
-TEST_F(TestPcSamplingInput, MockInputParameters_PcSamplingIntervalAndUnit_DefaultEmpty)
+TEST_F(TestPcSamplingInput, MockInputParameters_PcSamplingInterval_DefaultEmpty)
 {
     EXPECT_EQ(m_input_parameters->get_pc_sampling_interval(), std::string_view{""});
-    EXPECT_EQ(m_input_parameters->get_pc_sampling_unit(), std::string_view{""});
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -125,6 +116,37 @@ TEST_F(TestPcSamplingInput, OnHsaRuntimeLoaded_IntervalEnvUnset_UsesValueWithinA
     const auto chosen_interval = m_sdk_wrapper->get_configure_pc_sampling_info()[0].interval;
     EXPECT_GE(chosen_interval, min_interval);
     EXPECT_LE(chosen_interval, max_interval);
+}
+
+TEST_F(TestPcSamplingInput, OnHsaRuntimeLoaded_IntervalInRange_PassedThrough)
+{
+    EXPECT_EQ(configured_interval_for("256", 64, 4096), 256u);
+}
+
+TEST_F(TestPcSamplingInput, OnHsaRuntimeLoaded_IntervalAboveMax_ClampedToMax)
+{
+    EXPECT_EQ(configured_interval_for("100000", 64, 4096), 4096u);
+}
+
+TEST_F(TestPcSamplingInput, OnHsaRuntimeLoaded_IntervalBelowMin_RaisedToMin)
+{
+    EXPECT_EQ(configured_interval_for("1", 64, 4096), 64u);
+}
+
+TEST_F(TestPcSamplingInput, OnHsaRuntimeLoaded_IntervalNonNumeric_FallsBackToMin)
+{
+    EXPECT_EQ(configured_interval_for("abc", 64, 4096), 64u);
+}
+
+TEST_F(TestPcSamplingInput, OnHsaRuntimeLoaded_IntervalNegative_FallsBackToMin)
+{
+    // "-1" must not wrap to a huge value then clamp to max; it is invalid input.
+    EXPECT_EQ(configured_interval_for("-1", 64, 4096), 64u);
+}
+
+TEST_F(TestPcSamplingInput, OnHsaRuntimeLoaded_IntervalTrailingGarbage_FallsBackToMin)
+{
+    EXPECT_EQ(configured_interval_for("100abc", 64, 4096), 64u);
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -217,4 +239,22 @@ void TestPcSamplingInput::drive_hsa_runtime_loaded()
     ASSERT_EQ(m_sdk_wrapper->get_hsa_intercept_registration_info().size(), 1u);
     const auto reg = m_sdk_wrapper->get_hsa_intercept_registration_info()[0];
     reg.callback(ROCPROFILER_HSA_TABLE, 0, 0, nullptr, 0, reg.user_data);
+}
+
+uint64_t TestPcSamplingInput::configured_interval_for(const std::string& env_interval,
+                                                      uint64_t           min_interval,
+                                                      uint64_t           max_interval)
+{
+    constexpr rocprofiler_agent_id_t agent{101};
+    m_input_parameters->set_pc_sampling_beta_enabled("1");
+    m_input_parameters->set_pc_sampling_method("host_trap");
+    m_input_parameters->set_pc_sampling_interval(env_interval);
+    m_sdk_wrapper->set_available_gpu_agents({agent});
+    m_sdk_wrapper->set_pc_sampling_config(min_interval,
+                                          max_interval,
+                                          ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP,
+                                          ROCPROFILER_PC_SAMPLING_UNIT_CYCLES);
+    m_sdk_wrapper->set_configure_pc_sampling_status(ROCPROFILER_STATUS_SUCCESS);
+    drive_hsa_runtime_loaded();
+    return m_sdk_wrapper->get_configure_pc_sampling_info().at(0).interval;
 }

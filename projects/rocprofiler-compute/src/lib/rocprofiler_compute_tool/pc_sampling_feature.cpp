@@ -15,21 +15,6 @@ PcSamplingMode rocprofiler_compute_tool::parse_pc_sampling_mode(const std::strin
     return PcSamplingMode::Disabled;
 }
 
-pc_sampling_feature_t::pc_sampling_feature_t(PcSamplingMode mode, std::filesystem::path output_path)
-    : pc_sampling_feature_t(mode, std::move(output_path), pc_sampling_collector_t::create())
-{
-}
-
-pc_sampling_feature_t::pc_sampling_feature_t(PcSamplingMode               mode,
-                                             std::filesystem::path        output_path,
-                                             pc_sampling_collector_t::ptr collector)
-    : m_enabled(true)
-    , m_mode(mode)
-    , m_output_path(std::move(output_path))
-    , m_collector(std::move(collector))
-{
-}
-
 pc_sampling_feature_t::pc_sampling_feature_t(PcSamplingMode        mode,
                                              std::filesystem::path output_root,
                                              std::filesystem::path code_obj_path,
@@ -70,12 +55,6 @@ void pc_sampling_feature_t::add_kernel_symbol(uint64_t           code_object_id,
                                               const std::string& formatted_kernel_name)
 {
     m_collector->add_kernel_symbol(code_object_id, formatted_kernel_name);
-}
-
-instruction_t pc_sampling_feature_t::resolve_instruction(uint64_t code_object_id,
-                                                         uint64_t code_object_offset)
-{
-    return m_collector->resolve_instruction(code_object_id, code_object_offset);
 }
 
 void pc_sampling_feature_t::finalize()

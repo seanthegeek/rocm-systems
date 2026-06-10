@@ -46,13 +46,11 @@ TEST_F(test_pc_sample_decode_t, ProvidedStochasticHeader_MapsEveryFieldOneToOne)
     EXPECT_EQ(decoded->wave_issued, 0u);
     EXPECT_EQ(decoded->wave_cnt, 12u);
 
-    EXPECT_EQ(decoded->inst_type,
-              std::string(rocprofiler_get_pc_sampling_instruction_type_name(
-                  ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_VALU)));
+    // Decode stores the raw SDK enum value; the name is resolved at serialization.
+    EXPECT_EQ(decoded->inst_type, static_cast<uint32_t>(ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_VALU));
 
     EXPECT_EQ(decoded->snapshot.stall_reason,
-              std::string(rocprofiler_get_pc_sampling_instruction_not_issued_reason_name(
-                  ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_WAITCNT)));
+              static_cast<uint32_t>(ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_WAITCNT));
 
     EXPECT_EQ(decoded->snapshot.dual_issue_valu, 1u);
     EXPECT_EQ(decoded->snapshot.arb_state_issue_valu, 1u);
@@ -88,10 +86,10 @@ TEST_F(test_pc_sample_decode_t, ProvidedHostTrapHeader_MapsCommonFieldsAndLeaves
     EXPECT_EQ(decoded->wrkgrp_id.x, 142u);
     EXPECT_EQ(decoded->wave_in_grp, 1u);
 
-    // Stochastic-only fields are left default/empty for host-trap samples.
+    // Stochastic-only fields are left default (0) for host-trap samples.
     EXPECT_EQ(decoded->wave_cnt, 0u);
-    EXPECT_TRUE(decoded->inst_type.empty());
-    EXPECT_TRUE(decoded->snapshot.stall_reason.empty());
+    EXPECT_EQ(decoded->inst_type, 0u);
+    EXPECT_EQ(decoded->snapshot.stall_reason, 0u);
 }
 
 TEST_F(test_pc_sample_decode_t, ProvidedNonPcSamplingCategory_ReturnsNullopt)

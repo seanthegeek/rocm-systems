@@ -64,6 +64,12 @@ protected:
     // running initialize(), then fires the recorded intercept callback once.
     void drive_hsa_runtime_loaded();
 
+    // Configures one supporting agent with the given env interval and advertised
+    // [min,max] range, returning the interval handed to the SDK.
+    uint64_t configured_interval_for(const std::string& env_interval,
+                                     uint64_t           min_interval,
+                                     uint64_t           max_interval);
+
     rocprofiler_client_id_t              m_client_id{};
     std::shared_ptr<MockInputParameters> m_input_parameters;
     std::shared_ptr<MockSdkWrapper>      m_sdk_wrapper;

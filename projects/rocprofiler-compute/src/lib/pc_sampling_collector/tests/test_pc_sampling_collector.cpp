@@ -2,6 +2,8 @@
 // SPDX-License-Identifier:  MIT
 #include "test_pc_sampling_collector.h"
 
+#include "nlohmann/json.hpp"
+
 using namespace rocprofiler_compute_tool;
 
 TEST_F(test_pc_sampling_collector_t, ProvidedFileCodeObject_PassesItToDecode)
@@ -81,6 +83,44 @@ TEST_F(test_pc_sampling_collector_t, ProvidedSymbolInstructionSizeZero_Throws)
     const instruction_t instruction = {"inst0", "comment0", 0x1000, 0x10, 0};
     m_translator->add_instruction(instruction);
     EXPECT_THROW(m_pc_sampling_collector->write(*m_writer), std::runtime_error);
+}
+
+TEST_F(test_pc_sampling_collector_t, WriteSamples_InternsAndRoutesByKind)
+{
+    m_pc_sampling_collector->on_code_object_load(m_mem_info);
+    // The mock translator returns this instruction for any (id, vaddr) lookup,
+    // so both samples resolve to the same interned (name, comment) index 0.
+    m_translator->add_instruction({"v_add", "kernel.cpp:7", 0x1000, 0x10, 4});
+
+    pc_sample_record_t stochastic{};
+    stochastic.kind                  = pc_sample_kind_t::Stochastic;
+    stochastic.pc.code_object_id     = m_mem_info.code_object_id;
+    stochastic.pc.code_object_offset = 0x10;
+
+    pc_sample_record_t host_trap{};
+    host_trap.kind                  = pc_sample_kind_t::HostTrap;
+    host_trap.pc.code_object_id     = m_mem_info.code_object_id;
+    host_trap.pc.code_object_offset = 0x20;
+
+    m_pc_sampling_collector->append_sample(stochastic);
+    m_pc_sampling_collector->append_sample(host_trap);
+
+    pc_sample_writer_json_t writer;
+    m_pc_sampling_collector->write_samples(writer);
+
+    const auto  json = nlohmann::json::parse(writer.get_result());
+    const auto& root = json["rocprofiler-sdk-tool"][0];
+
+    // One sample landed in each kind-specific bucket.
+    ASSERT_EQ(root["buffer_records"]["pc_sample_stochastic"].size(), 1u);
+    ASSERT_EQ(root["buffer_records"]["pc_sample_host_trap"].size(), 1u);
+
+    // Both resolved to the same interned instruction string at index 0.
+    EXPECT_EQ(root["buffer_records"]["pc_sample_stochastic"][0]["inst_index"], 0);
+    EXPECT_EQ(root["buffer_records"]["pc_sample_host_trap"][0]["inst_index"], 0);
+    ASSERT_EQ(root["strings"]["pc_sample_instructions"].size(), 1u);
+    EXPECT_EQ(root["strings"]["pc_sample_instructions"][0], "v_add");
+    EXPECT_EQ(root["strings"]["pc_sample_comments"][0], "kernel.cpp:7");
 }
 
 void test_pc_sampling_collector_t::SetUp()
