@@ -38,12 +38,12 @@ public:
 
         metrics out{};
         convert_power(raw, out);
-        convert_temperature(raw, out);
         convert_activity(raw, out);
         convert_xcp(raw, out);
         convert_xgmi(raw, out);
         convert_pcie(raw, out);
         convert_clocks(raw, out);
+        convert_temperature(m_handle, out);
         return out;
     }
 
@@ -116,10 +116,26 @@ private:
         out.average_socket_power = raw.average_socket_power;
     }
 
-    static void convert_temperature(const amdsmi_gpu_metrics_t& raw, metrics& out)
+    static void populate_temp_metric(amdsmi_processor_handle   handle,
+                                     amdsmi_temperature_type_t sensor_type,
+                                     std::uint32_t&            out)
     {
-        out.hotspot_temperature = raw.temperature_hotspot;
-        out.edge_temperature    = raw.temperature_edge;
+        std::int64_t temperature = 0;
+        if(amdsmi_get_temp_metric(handle, sensor_type, AMDSMI_TEMP_CURRENT,
+                                  &temperature) != AMDSMI_STATUS_SUCCESS ||
+           temperature < 0)
+        {
+            out = METRIC_VALUE_NOT_SUPPORTED_16;
+            return;
+        }
+        out = static_cast<std::uint32_t>(temperature);
+    }
+
+    static void convert_temperature(amdsmi_processor_handle handle, metrics& out)
+    {
+        populate_temp_metric(handle, AMDSMI_TEMPERATURE_TYPE_HOTSPOT,
+                             out.hotspot_temperature);
+        populate_temp_metric(handle, AMDSMI_TEMPERATURE_TYPE_EDGE, out.edge_temperature);
     }
 
     static void convert_activity(const amdsmi_gpu_metrics_t& raw, metrics& out)
