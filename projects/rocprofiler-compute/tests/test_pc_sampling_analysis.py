@@ -583,11 +583,12 @@ def test_load_per_kernel_offset_sort_is_numeric() -> None:
 def make_per_kernel_guard_data(
     instructions: list | None,
     comments: list | None,
+    indices: tuple[int, int] = (0, 1),
 ) -> dict:
     """Per-kernel tool_data with caller-controlled instruction/comment tables."""
     samples = [
-        make_record(5, 0x10, 0, dispatch_id=0),
-        make_record(5, 0x20, 1, dispatch_id=1),
+        make_record(5, 0x10, indices[0], dispatch_id=0),
+        make_record(5, 0x20, indices[1], dispatch_id=1),
     ]
     return make_tool_data(
         host_trap=samples,
@@ -599,13 +600,14 @@ def make_per_kernel_guard_data(
 
 
 @pytest.mark.parametrize(
-    "instructions, comments, instruction_none, source_line_na",
+    "instructions, comments, instruction_none, source_line_na, indices",
     [
         pytest.param(
             ["v_mov"],
             ["/s/a.cpp:1", "/s/a.cpp:2"],
             "some",
             "none",
+            (0, 1),
             id="instructions_short",
         ),
         pytest.param(
@@ -613,7 +615,16 @@ def make_per_kernel_guard_data(
             ["/s/a.cpp:1"],
             "none",
             "some",
+            (0, 1),
             id="comments_short",
+        ),
+        pytest.param(
+            ["v_mov"],
+            ["/s/a.cpp:1", "/s/a.cpp:2", "/s/a.cpp:3", "/s/a.cpp:4", "/s/a.cpp:5"],
+            "all",
+            "none",
+            (3, 4),
+            id="instructions_all_out_of_range",
         ),
     ],
 )
@@ -622,13 +633,14 @@ def test_load_per_kernel_out_of_range_index_guards(
     comments: list | None,
     instruction_none: str,
     source_line_na: str,
+    indices: tuple[int, int],
 ) -> None:
     """An inst_index past a string table yields None / 'N/A', not an error.
 
     instruction stays None when out of range; source_line uses the "N/A"
     sentinel so display code does not suppress the table.
     """
-    tool_data = make_per_kernel_guard_data(instructions, comments)
+    tool_data = make_per_kernel_guard_data(instructions, comments, indices)
     df = load_pc_sampling_data_per_kernel(
         method="host_trap",
         tool_data=tool_data,
@@ -1394,16 +1406,20 @@ def test_pc_sampling_analyze_sorting_type(
 
 def test_pc_sampling_analyze_db_output(
     binary_handler_analyze_rocprof_compute,
+    monkeypatch,
 ) -> None:
     """Analyze in db mode produces a populated pcsampling table."""
-    workload_dir = common.setup_workload_dir(PC_SAMPLING_WORKLOAD)
+    workload_dir = Path(common.setup_workload_dir(PC_SAMPLING_WORKLOAD)).resolve()
     db_name = "pc_sampling_db_test"
-    db_path = Path(f"{db_name}.db")
+    db_path = workload_dir / f"{db_name}.db"
+    # --output-name rejects path separators, so run from inside the workload
+    # dir to keep the db there; clean_output_dir then removes it with the dir.
+    monkeypatch.chdir(workload_dir)
     try:
         code = binary_handler_analyze_rocprof_compute([
             "analyze",
             "--path",
-            workload_dir,
+            str(workload_dir),
             "--block",
             "21",
             "--output-format",
@@ -1422,8 +1438,7 @@ def test_pc_sampling_analyze_db_output(
             conn.close()
         assert row_count > 0
     finally:
-        db_path.unlink(missing_ok=True)
-        common.clean_output_dir(True, workload_dir)
+        common.clean_output_dir(True, str(workload_dir))
 
 
 def test_pc_sampling_analyze_list_stats(
