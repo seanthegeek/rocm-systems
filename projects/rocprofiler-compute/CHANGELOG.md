@@ -12,6 +12,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* PC sampling now uses the native collector by default for the rocprofiler-sdk profiler; use ``--no-native-tool`` to fall back to the rocprofiler-sdk PC sampling pass.
+
 ### Removed
 
 ### Optimized
