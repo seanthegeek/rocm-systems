@@ -287,16 +287,19 @@ void on_hsa_runtime_loaded(rocprofiler_intercept_table_t /*type*/,
     if (g_hsa_intercept_done.exchange(true, std::memory_order_acq_rel))
         return;
 
-    g_sdk_wrapper->configure_callback_dispatch_counting_service(get_client_ctx(),
-                                                                dispatch_callback,
-                                                                user_data,
-                                                                record_callback,
-                                                                user_data);
-
+    // The dispatch counting service and the PC sampling service cannot share a
+    // context (the SDK rejects the second with "Context has a conflict with
+    // another context"). Only configure counter collection when counters were
+    // actually requested; PC-sampling-only runs leave the context to PC
+    // sampling alone.
     auto* tool = static_cast<std::unique_ptr<tool_data_t>*>(user_data)->get();
-    if (tool->pc_sampling.enabled())
+    if (!tool->requested_counters.empty())
     {
-        setup_pc_sampling(get_client_ctx(), tool, user_data);
+        g_sdk_wrapper->configure_callback_dispatch_counting_service(get_client_ctx(),
+                                                                    dispatch_callback,
+                                                                    user_data,
+                                                                    record_callback,
+                                                                    user_data);
     }
 
     g_sdk_wrapper->start_context(get_client_ctx());
@@ -313,6 +316,17 @@ int tool_init(rocprofiler_client_finalize_t, void* user_data)
                                                       0,
                                                       tool_tracing_callback,
                                                       user_data);
+
+    // PC sampling buffer creation and service configuration must happen inside
+    // the rocprofiler configuration period (tool_init); the SDK rejects them
+    // afterwards with "Configuration request occurred outside of valid
+    // rocprofiler configuration period". Only the HSA-touching pieces (counter
+    // dispatch service, start_context) are deferred to on_hsa_runtime_loaded.
+    auto* tool = static_cast<std::unique_ptr<tool_data_t>*>(user_data)->get();
+    if (tool->pc_sampling.enabled())
+    {
+        setup_pc_sampling(get_client_ctx(), tool, user_data);
+    }
     return 0;
 }
 
