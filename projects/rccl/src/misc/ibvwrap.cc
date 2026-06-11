@@ -23,6 +23,14 @@ static std::once_flag initOnceFlag;
 static ncclResult_t initResult;
 struct ncclIbvSymbols ibvSymbols;
 
+#ifdef ENABLE_FAULT_INJECTION
+// Defined in src/transport/net_ib_cast/net_ib_ops_fault.cc. Forward-declared here
+// (rather than including the transport header) to avoid widening this file's
+// include path. Installs/removes fault shims on the context's ops table.
+extern "C" ncclResult_t ncclIbOpsFaultInstall(struct ibv_context* ctx);
+extern "C" ncclResult_t ncclIbOpsFaultRemove(struct ibv_context* ctx);
+#endif
+
 #ifdef ENABLE_QP_TRACKING
 #include <unordered_map>
 #include <algorithm>
@@ -151,11 +159,28 @@ const char *wrap_ibv_get_device_name(struct ibv_device *device) {
   return ibvSymbols.ibv_internal_get_device_name(device);
 }
 
-ncclResult_t wrap_ibv_open_device(struct ibv_context **ret, struct ibv_device *device) { /*returns 0 on success, -1 on failure*/
+ncclResult_t wrap_ibv_open_device(struct ibv_context **ret, struct ibv_device *device) { /*returns ncclResult_t (ncclSuccess on success)*/
+#ifdef ENABLE_FAULT_INJECTION
+  // Manually expand IBV_PTR_CHECK so we can install fault shims on the returned
+  // context before returning to the caller.
+  CHECK_NOT_NULL(ibvSymbols, ibv_internal_open_device);
+  *ret = ibvSymbols.ibv_internal_open_device(device);
+  if (*ret == NULL) {
+    WARN("Call to ibv_open_device failed");
+    return ncclSystemError;
+  }
+  NCCLCHECK(ncclIbOpsFaultInstall(*ret));
+  return ncclSuccess;
+#else
   IBV_PTR_CHECK(ibvSymbols, ibv_internal_open_device, ibv_internal_open_device(device), *ret, NULL, "ibv_open_device");
+#endif
 }
 
-ncclResult_t wrap_ibv_close_device(struct ibv_context *context) { /*returns 0 on success, -1 on failure*/
+ncclResult_t wrap_ibv_close_device(struct ibv_context *context) { /*returns ncclResult_t (ncclSuccess on success)*/
+#ifdef ENABLE_FAULT_INJECTION
+  // Restore original ops before closing so the real close sees a clean context.
+  if (context) NCCLCHECK(ncclIbOpsFaultRemove(context));
+#endif
   IBV_INT_CHECK(ibvSymbols, ibv_internal_close_device, ibv_internal_close_device(context), -1, "ibv_close_device");
 }
 
