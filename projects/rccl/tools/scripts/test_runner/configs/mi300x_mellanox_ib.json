@@ -1059,6 +1059,11 @@
           "name": "FaultInj_Cast_OpsPollCqFlushNonFatal",
           "description": "CAST ops-overload: poll_cq shim rewrites QP 0 completion status to WR_FLUSH_ERR; failover completes via surviving device, fatalCount==0",
           "test_filter": "NetIbMPITest.FaultInjCastOpsPollCqFlushNonFatal"
+        },
+        {
+          "name": "FaultInj_Cast_OpsPollCqSynthFatal",
+          "description": "CAST ops-overload: poll_cq shim synthesizes a non-whitelisted REM_ACCESS_ERR completion; fatal/non-recoverable",
+          "test_filter": "NetIbMPITest.FaultInjCastOpsPollCqSynthFatal"
         }
       ]
     },
