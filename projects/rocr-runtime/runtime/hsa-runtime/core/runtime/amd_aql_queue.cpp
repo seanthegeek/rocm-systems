@@ -72,7 +72,7 @@
 #include "core/inc/amd_gpu_pm4.h"
 #include "core/inc/hsa_amd_tool_int.hpp"
 #include "core/inc/amd_core_dump.hpp"
-#include "core/util/rocr_logging.h"
+#include "core/util/logging.h"
 
 namespace rocr {
 namespace AMD {

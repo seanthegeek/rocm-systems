@@ -351,7 +351,7 @@ class Flag {
 
     // Note: Logging configuration is handled by rocr_log_init() in rocr_logging.cpp.
     // The Flag members below are kept for backward compatibility and query-only access.
-    // The authoritative logging state is in g_rocr_log_state (rocr_logging.h).
+    // The authoritative logging state is in g_rocr_log_state (logging.h).
     var = os::GetEnvVar("HSA_LOG_LEVEL");
     hsa_log_level_ = var.empty() ? 0 : atoi(var.c_str());
 

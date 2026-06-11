@@ -50,7 +50,7 @@
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/hsa_internal.h"
 #include "core/util/utils.h"
-#include "core/util/rocr_logging.h"
+#include "core/util/logging.h"
 
 namespace rocr {
 namespace AMD {
@@ -631,15 +631,6 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(void* dst, const void* src,
                                      HSA_WAIT_STATE_ACTIVE) != 0) {
     // Signal wait returned unexpected value.
     return HSA_STATUS_ERROR;
-  }
-
-  if(agent_->profiling_enabled()) {
-    amd_signal_t* amd_signal = reinterpret_cast<amd_signal_t*>(completion_signal_.handle);
-    RocrLogInfo(ROCR_LOG_BLIT, "BlitKernel::SubmitLinearCopyCommand Signal=0x%llx ticks=%llu/%llu elapsed=%llu",
-                 (unsigned long long)completion_signal_.handle,
-                 (unsigned long long)amd_signal->start_ts,
-                 (unsigned long long)amd_signal->end_ts,
-                 (unsigned long long)(amd_signal->end_ts - amd_signal->start_ts));
   }
 
   return HSA_STATUS_SUCCESS;

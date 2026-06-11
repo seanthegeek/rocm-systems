@@ -78,8 +78,14 @@
 #include "core/inc/signal.h"
 #include "core/util/memory.h"
 #include "core/util/os.h"
-#include "core/util/rocr_logging.h"
+#include "core/util/logging.h"
 #include "inc/hsa_ven_amd_aqlprofile.h"
+
+// libhsakmt (thunk) debug level for unified logging integration.
+// When CLR calls hsa_amd_enable_logging(), we also configure thunk logging
+// so users only need to set AMD_LOG_LEVEL for all three layers.
+// Levels: ERR=3, WARNING=4, INFO=6, DEBUG=7
+extern "C" int hsakmt_debug_level;
 
 #ifndef HSA_VERSION_MAJOR
 #define HSA_VERSION_MAJOR 1
@@ -4464,9 +4470,9 @@ hsa_status_t Runtime::VMemoryGetAllocPropertiesFromHandle(hsa_amd_vmem_alloc_han
 
 hsa_status_t Runtime::EnableLogging(uint8_t* flags, void* file) {
   // Public API: hsa_amd_enable_logging()
-  // Maps legacy flag bits to new logging system categories
+  // Called by CLR when AMD_LOG_LEVEL >= 6
 
-  // Determine output file
+  // Determine output file - caller owns this handle, we must not close it
   FILE* log_file = file ? reinterpret_cast<FILE*>(file) : stderr;
 
   // Check if any flag is set
@@ -4479,31 +4485,27 @@ hsa_status_t Runtime::EnableLogging(uint8_t* flags, void* file) {
   }
 
   if (any_flag_set) {
-    // Map legacy flags to new mask categories
+    // Map legacy flags to simplified categories (MEM/INFO/ERROR)
     uint64_t mask = 0;
-    if (hsa_flag_isset64(flags, 0))  mask |= rocr::ROCR_LOG_AQL;      // HSA_AMD_LOG_FLAG_AQL
-    if (hsa_flag_isset64(flags, 1))  mask |= rocr::ROCR_LOG_SDMA;     // HSA_AMD_LOG_FLAG_SDMA
-    if (hsa_flag_isset64(flags, 2))  mask |= rocr::ROCR_LOG_INIT;     // HSA_AMD_LOG_FLAG_INFO
-    if (hsa_flag_isset64(flags, 3))  mask |= rocr::ROCR_LOG_QUEUE;    // HSA_AMD_LOG_FLAG_QUEUE
-    if (hsa_flag_isset64(flags, 4))  mask |= rocr::ROCR_LOG_MEM;      // HSA_AMD_LOG_FLAG_MEM
-    if (hsa_flag_isset64(flags, 5))  mask |= rocr::ROCR_LOG_SIGNAL;   // HSA_AMD_LOG_FLAG_SIGNAL
-    if (hsa_flag_isset64(flags, 6))  mask |= rocr::ROCR_LOG_IPC;      // HSA_AMD_LOG_FLAG_IPC
-    if (hsa_flag_isset64(flags, 7))  mask |= rocr::ROCR_LOG_AGENT;    // HSA_AMD_LOG_FLAG_AGENT
-    if (hsa_flag_isset64(flags, 8))  mask |= rocr::ROCR_LOG_COPY;     // HSA_AMD_LOG_FLAG_COPY
-    if (hsa_flag_isset64(flags, 9))  mask |= rocr::ROCR_LOG_SCRATCH;  // HSA_AMD_LOG_FLAG_SCRATCH
-    if (hsa_flag_isset64(flags, 10)) mask |= rocr::ROCR_LOG_POOL;     // HSA_AMD_LOG_FLAG_POOL
-    if (hsa_flag_isset64(flags, 11)) mask |= rocr::ROCR_LOG_FAULT;    // HSA_AMD_LOG_FLAG_FAULT
-    if (hsa_flag_isset64(flags, 12)) mask |= rocr::ROCR_LOG_EXCEPT;   // HSA_AMD_LOG_FLAG_EXCEPT
+    if (hsa_flag_isset64(flags, HSA_AMD_LOG_FLAG_AQL))   mask |= rocr::LOG_INFO_CAT;
+    if (hsa_flag_isset64(flags, HSA_AMD_LOG_FLAG_SDMA))  mask |= rocr::LOG_INFO_CAT;
+    if (hsa_flag_isset64(flags, HSA_AMD_LOG_FLAG_INFO))  mask |= rocr::LOG_INFO_CAT;
+    if (hsa_flag_isset64(flags, HSA_AMD_LOG_FLAG_MEM))   mask |= rocr::LOG_MEM;
+    if (hsa_flag_isset64(flags, HSA_AMD_LOG_FLAG_ERROR)) mask |= rocr::LOG_ERROR_CAT;
 
-    rocr::g_rocr_log_state.log_level = rocr::ROCR_LOG_INFO;
-    rocr::g_rocr_log_state.log_mask = mask;
-    rocr::g_rocr_log_state.log_file = log_file;
-    // Caller owns this file handle - we must not close it on shutdown
-    rocr::g_rocr_log_state.owns_log_file = false;
-    // Update fd for async-signal-safe crash handler
-    rocr::g_rocr_log_state.log_file_fd = (log_file == stderr) ? STDERR_FILENO : fileno(log_file);
+    rocr::g_log_state.log_level = rocr::LOG_INFO;
+    rocr::g_log_state.log_mask = mask;
+    rocr::g_log_state.log_file = log_file;
+    rocr::g_log_state.owns_log_file = false;  // Caller owns file handle
+    rocr::g_log_state.clr_controlled = true;
+
+    // Enable thunk (libhsakmt) logging for unified logging.
+    // When CLR enables ROCR logging via this API, also enable thunk logging
+    // so users only need AMD_LOG_LEVEL for all three layers (CLR, ROCR, Thunk).
+    hsakmt_debug_level = 6;  // HSAKMT_DEBUG_LEVEL_INFO
   } else {
-    rocr::g_rocr_log_state.log_level = rocr::ROCR_LOG_NONE;
+    rocr::g_log_state.log_level = rocr::LOG_NONE;
+    hsakmt_debug_level = -1;  // HSAKMT_DEBUG_LEVEL_DEFAULT (disabled)
   }
 
   return HSA_STATUS_SUCCESS;

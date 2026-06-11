@@ -55,7 +55,7 @@
 #include "core/inc/queue.h"
 #include "core/inc/signal.h"
 #include "core/inc/cache.h"
-#include "core/util/rocr_logging.h"
+#include "core/util/logging.h"
 #include "core/inc/amd_elf_image.hpp"
 #include "core/inc/amd_hsa_loader.hpp"
 #include "core/inc/amd_loader_context.hpp"

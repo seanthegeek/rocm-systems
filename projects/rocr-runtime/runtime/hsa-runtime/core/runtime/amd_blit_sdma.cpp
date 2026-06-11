@@ -56,7 +56,7 @@
 #include "core/inc/signal.h"
 #include "core/inc/interrupt_signal.h"
 #include "core/inc/default_signal.h"
-#include "core/util/rocr_logging.h"
+#include "core/util/logging.h"
 
 namespace rocr {
 namespace AMD {

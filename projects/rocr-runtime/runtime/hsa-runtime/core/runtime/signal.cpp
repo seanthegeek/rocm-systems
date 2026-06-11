@@ -51,7 +51,7 @@
 
 #include "core/util/timer.h"
 #include "core/inc/runtime.h"
-#include "core/util/rocr_logging.h"
+#include "core/util/logging.h"
 #if defined(_WIN32)
 #include "malloc.h"
 #endif
