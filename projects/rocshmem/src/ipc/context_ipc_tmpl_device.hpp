@@ -547,7 +547,7 @@ __device__ void IPCContext::alltoall_linear_thread_puts(rocshmem_team_t team,
     volatile long *vol_ivars = &pSync[alltoall_pSync_offset + dest_pe];
     while (uncached_load(vol_ivars) != 1) { }
 
-    //quiet(dest_pe);// needed to quiet add when it is nbi in gda, it is not nbi in ipc
+    quiet(); // needed to quiet add when it is nbi in gda, it is not nbi in ipc
 
     pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
   }
