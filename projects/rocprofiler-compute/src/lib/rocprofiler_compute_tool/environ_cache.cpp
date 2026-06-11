@@ -9,10 +9,19 @@ extern "C" char** environ;
 namespace
 {
 constexpr std::string_view kRocprofPrefix{"ROCPROF_"};
+// The PC sampling feature gate ships as ROCPROFILER_PC_SAMPLING_BETA_ENABLED,
+// which does not start with "ROCPROF_" (offset 7 is 'I', not '_'). Capture the
+// ROCPROFILER_ family too so that variable reaches InputParameters.
+constexpr std::string_view kRocprofilerPrefix{"ROCPROFILER_"};
+
+bool starts_with(std::string_view name, std::string_view prefix)
+{
+    return name.size() >= prefix.size() && name.substr(0, prefix.size()) == prefix;
+}
 
 bool has_rocprof_prefix(std::string_view name)
 {
-    return name.size() >= kRocprofPrefix.size() && name.substr(0, kRocprofPrefix.size()) == kRocprofPrefix;
+    return starts_with(name, kRocprofPrefix) || starts_with(name, kRocprofilerPrefix);
 }
 
 }  // namespace
