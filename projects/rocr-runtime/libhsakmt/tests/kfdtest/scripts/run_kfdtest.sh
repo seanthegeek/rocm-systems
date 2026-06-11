@@ -239,6 +239,7 @@ runKfdTest() {
         hsaNodes=$NODE
     fi
 
+    local aggregate_fail=0
     for hsaNode in $hsaNodes; do
         nodeName=$(getNodeName $hsaNode)
         if [ "$PLATFORM" != "" ] && [ "$PLATFORM" != "$nodeName" ]; then
@@ -266,6 +267,7 @@ runKfdTest() {
                 echo "Finished node $hsaNode ($nodeName) successfully in docker container"
             else
                 echo "Testing failed for node $hsaNode ($nodeName) in docker container"
+                ((aggregate_fail+=1))
             fi
             sudo docker rm kfdtest_docker
         else
@@ -273,24 +275,24 @@ runKfdTest() {
                 echo "++++ Starting parallel testing on node(s) $CONCURRENTNODES  ++++"
                 $GDB $KFDTEST "--concurrentnodes=$CONCURRENTNODES" $gtestFilter $GTEST_ARGS
                 echo "++++ Finished parallel testing on node(s) $CONCURRENTNODES  ++++"
-                exit 0;
+                exit $?;
             elif [ -n "$TESTNODENUM" ]; then
                 echo "++++ Starting parallel testing on $TESTNODENUM node(s) ++++"
                 $GDB $KFDTEST "--testnodenum=$TESTNODENUM" $gtestFilter $GTEST_ARGS
                 echo "++++ Finished parallel testing on $TESTNODENUM node(s) ++++"
-                exit 0;
+                exit $?;
             else
                 echo ""
                 echo "++++ Starting testing node $hsaNode ($nodeName) ++++"
                 $GDB $KFDTEST "--node=$hsaNode" $gtestFilter $GTEST_ARGS
                 echo "---- Finished testing node $hsaNode ($nodeName) ----"
             fi
-
+            ((aggregate_fail+=$?))
         fi
 
 
     done
-
+    exit $aggregate_fail
 }
 
 # Prints number of GPUs present in the system
