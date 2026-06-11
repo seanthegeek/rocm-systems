@@ -920,6 +920,8 @@ hipError_t hipStreamGetDevResource(hipStream_t hStream, hipDevResource* resource
 hipError_t hipExecutionCtxRecordEvent(hipExecutionCtx_t ctx, hipEvent_t event);
 hipError_t hipExecutionCtxSynchronize(hipExecutionCtx_t ctx);
 hipError_t hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEvent_t event);
+hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* location,
+                                   hipMemAllocationType type);
 }  // namespace hip
 
 namespace hip {
@@ -1499,6 +1501,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipExecutionCtxRecordEvent_fn = hip::hipExecutionCtxRecordEvent;
   ptrDispatchTable->hipExecutionCtxSynchronize_fn = hip::hipExecutionCtxSynchronize;
   ptrDispatchTable->hipExecutionCtxWaitEvent_fn = hip::hipExecutionCtxWaitEvent;
+  ptrDispatchTable->hipMemGetDefaultMemPool_fn = hip::hipMemGetDefaultMemPool;
 }
 
 #if HIP_ROCPROFILER_REGISTER > 0
@@ -2223,16 +2226,17 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipExecutionCtxWaitEvent_fn, 534);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 29
 HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryGetGlobal_fn, 535);
 HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryGetManaged_fn, 536);
-
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 30
+HIP_ENFORCE_ABI(HipDispatchTable, hipMemGetDefaultMemPool_fn, 537);
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
 //
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 537)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 538)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 29,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 30,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif

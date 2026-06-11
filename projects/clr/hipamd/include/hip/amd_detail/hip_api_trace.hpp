@@ -48,7 +48,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 1
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 29
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 30
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -1133,7 +1133,6 @@ typedef hipError_t (*t_hipMipmappedArrayGetMemoryRequirements)(
 typedef hipError_t (*t_hipGreenCtxCreate)(hipExecutionCtx_t* ctx, hipDevResourceDesc_t desc, int device,
                                          unsigned int flags);
 typedef hipError_t (*t_hipExecutionCtxDestroy)(hipExecutionCtx_t ctx);
-typedef hipError_t (*t_hipExecutionCtxStreamCreate)(hipStream_t* stream, hipExecutionCtx_t greenctx,
                                                      unsigned int flags, int priority);
 typedef hipError_t (*t_hipDeviceGetDevResource)(hipDevice_t device, hipDevResource* resource,
                                                 hipDevResourceType type);
@@ -1160,10 +1159,10 @@ typedef hipError_t (*t_hipExecutionCtxRecordEvent)(hipExecutionCtx_t ctx, hipEve
 typedef hipError_t (*t_hipExecutionCtxSynchronize)(hipExecutionCtx_t ctx);
 typedef hipError_t (*t_hipExecutionCtxWaitEvent)(hipExecutionCtx_t ctx, hipEvent_t event);
 
-// HIP Compiler dispatch table
+typedef hipError_t (*t_hipMemGetDefaultMemPool)(hipMemPool_t* memPool, hipMemLocation* location,
+                                                hipMemAllocationType type);
 struct HipCompilerDispatchTable {
   // HIP_COMPILER_API_TABLE_STEP_VERSION == 0
-  size_t size;
   t___hipPopCallConfiguration __hipPopCallConfiguration_fn;
   t___hipPushCallConfiguration __hipPushCallConfiguration_fn;
   t___hipRegisterFatBinary __hipRegisterFatBinary_fn;
@@ -1798,8 +1797,11 @@ struct HipDispatchTable {
   t_hipLibraryGetGlobal hipLibraryGetGlobal_fn;
   t_hipLibraryGetManaged hipLibraryGetManaged_fn;
 
-  // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 30
+  t_hipMemGetDefaultMemPool hipMemGetDefaultMemPool_fn;
+
+  // DO NOT EDIT ABOVE!
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 31
 
   // ******************************************************************************************* //
   //
