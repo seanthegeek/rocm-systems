@@ -11,6 +11,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* PC sampling analysis now sources the per-instruction table's ``instruction`` and ``source_line`` columns from the native collector's code-object listing (``*_code_obj_info.json``) when present, matched by code object id and offset. Runs without the native collector fall back to the rocprofiler-sdk string tables and are unchanged.
+
 ### Removed
 
 ### Optimized

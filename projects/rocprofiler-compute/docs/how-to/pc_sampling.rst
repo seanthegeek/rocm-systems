@@ -132,6 +132,21 @@ Sorting a single kernel by sample ``count`` instead of ``offset``:
    ╘═════════╧═══════════════╧═════════════════════════════════════════════════════╧══════════════════╧══════════╧═════════╧════════════════╧═════════════════╧═════════════════════════════════════════════════════════════════════════════════════╧══════════════════════════════════════╛
 
 
+ISA lines from the native collector
+===================================
+
+When a workload is collected with the native PC sampling collector, the
+analysis reads the ISA listing from the collector's code-object output
+(``*_code_obj_info.json`` in the workload directory). The ``instruction`` and
+``source_line`` columns of the per-instruction table are then sourced from that
+native listing, matched to each sample by its code object id and offset.
+
+This path is automatic and optional: when no ``*_code_obj_info.json`` is present
+(for example, a rocprofiler-sdk-only run), the ``instruction`` and
+``source_line`` columns fall back to the rocprofiler-sdk string tables, and the
+output is unchanged. When the native listing is present but an offset has no
+matching entry, ``instruction`` is left empty and ``source_line`` shows ``N/A``.
+
 .. note::
 
   * To associate PC sampling info back to HIP source code, you need to build the profiling target app with ``-g`` to keep the symbols. Otherwise, PC sampling info will be only associated with assembly lines.
