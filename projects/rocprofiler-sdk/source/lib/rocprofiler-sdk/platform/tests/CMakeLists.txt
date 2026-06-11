@@ -12,25 +12,35 @@ target_sources(platform-dispatch-tests PRIVATE ${ROCPROFILER_LIB_PLATFORM_TEST_S
 target_link_libraries(
     platform-dispatch-tests
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-static-library
-            rocprofiler-sdk::rocprofiler-sdk-common-library
-            rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
-            rocprofiler-sdk::rocprofiler-sdk-drm
-            GTest::gtest
+            rocprofiler-sdk::rocprofiler-sdk-common-library GTest::gtest
             GTest::gtest_main)
 
-# Reuse the sysfs topology fixture from lib/tests so the gnulinux force-platform test can
-# resolve a real node tree on bare-metal CI.
-file(
-    GLOB _NODE_PROPERTIES
-    ${CMAKE_SOURCE_DIR}/source/lib/rocprofiler-sdk/tests/data/topology/nodes/*/properties)
+# hsa-runtime and drm are the Linux KFD/amdgpu backends; they are not part of the
+# native-Windows build, where topology comes from the D3DKMT + wkmi enumerator.
+if(NOT WIN32)
+    target_link_libraries(
+        platform-dispatch-tests PRIVATE rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
+                                        rocprofiler-sdk::rocprofiler-sdk-drm)
+endif()
 
-rocprofiler_add_unit_test(
-    TARGET platform-dispatch-tests
-    SOURCES ${ROCPROFILER_LIB_PLATFORM_TEST_SOURCES}
-    TIMEOUT 30
-    LABELS "unittests;platform-dispatch"
-    DATA "${CMAKE_SOURCE_DIR}/source/lib/rocprofiler-sdk/tests/data/topology/nodes"
-    CONFIGURE_FILES "${_NODE_PROPERTIES}"
-    ENVIRONMENT
-        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
-    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+if(WIN32)
+    # Windows resolves dependent DLLs via PATH (no LD_LIBRARY_PATH). The sysfs/KFD
+    # topology fixture is Linux-only, so the Windows tests run without it - they exercise
+    # the D3DKMT negative path, which needs no fixture.
+    rocprofiler_add_unit_test(
+        TARGET platform-dispatch-tests
+        SOURCES ${ROCPROFILER_LIB_PLATFORM_TEST_SOURCES}
+        TIMEOUT 30
+        LABELS "unittests;platform-dispatch"
+        ENVIRONMENT "PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}\\;$ENV{PATH}"
+        FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+else()
+    rocprofiler_add_unit_test(
+        TARGET platform-dispatch-tests
+        SOURCES ${ROCPROFILER_LIB_PLATFORM_TEST_SOURCES}
+        TIMEOUT 30
+        LABELS "unittests;platform-dispatch"
+        ENVIRONMENT
+            "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+        FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+endif()
