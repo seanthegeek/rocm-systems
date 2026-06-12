@@ -46,21 +46,50 @@ jobs:
           ref: ${{ github.event.inputs.corpus_ref || 'develop' }}
           path: rocjitsu-test-corpus
 
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build
+
+      - name: Install ROCm SDK
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --pre \
+            --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
+            "rocm[devel]"
+
+          ROCM_ROOT="$(rocm-sdk path --root)"
+          ROCM_BIN="$(rocm-sdk path --bin)"
+          LLVM_BIN="${ROCM_ROOT}/lib/llvm/bin"
+
+          test -x "${LLVM_BIN}/amdclang"
+          test -x "${LLVM_BIN}/amdclang++"
+
+          {
+            echo "ROCM_PATH=${ROCM_ROOT}"
+            echo "CC=${LLVM_BIN}/amdclang"
+            echo "CXX=${LLVM_BIN}/amdclang++"
+          } >> "${GITHUB_ENV}"
+
+          {
+            echo "${ROCM_BIN}"
+            echo "${LLVM_BIN}"
+          } >> "${GITHUB_PATH}"
+
       - name: Build rocjitsu
         working-directory: ${{ env.ROCJITSU_SOURCE_DIR }}
         run: |
-          cmake -B "${ROCJITSU_BUILD_DIR}" -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake -B "${ROCJITSU_BUILD_DIR}" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER="${CC}" \
+            -DCMAKE_CXX_COMPILER="${CXX}"
           cmake --build "${ROCJITSU_BUILD_DIR}" -j"$(nproc)"
+          echo "${ROCJITSU_BUILD_DIR}/tools/rocjitsu" >> "${GITHUB_PATH}"
 
       - name: Install corpus test dependencies
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
