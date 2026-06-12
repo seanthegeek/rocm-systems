@@ -28,6 +28,18 @@ def recursion_rules(validation_rules_dir: Path) -> list[Path]:
     return [rules_dir / "recursion-rules.json"]
 
 
+@pytest.fixture
+def numa_alloc_rules(validation_rules_dir: Path) -> list[Path]:
+    rules_dir = validation_rules_dir / "minimal"
+    return [rules_dir / "numa-alloc-rules.json"]
+
+
+@pytest.fixture
+def pthreads_rules(validation_rules_dir: Path) -> list[Path]:
+    rules_dir = validation_rules_dir / "minimal"
+    return [rules_dir / "pthreads-rules.json"]
+
+
 # =============================================================================
 # Tests
 # =============================================================================
@@ -84,4 +96,83 @@ class TestMinimal(RocprofsysTest):
                 r"key\s*::\s*debug\.source_object",
                 r"string_value\s*::\s*minimal-recursion",
             ],
+        )
+
+    @pytest.mark.rocpd("rocpd_env")
+    @pytest.mark.parametrize("mode", ["binary_rewrite", "runtime_instrument", "sys_run"])
+    def test_numa_alloc(self, mode, rocpd_env, numa_alloc_rules):
+        """
+        Ensure that numa_alloc gotcha arguments (the allocation size) are
+        stored in the trace cache and surfaced in both perfetto and rocpd.
+        """
+        env = rocpd_env.copy()
+        env["ROCPROFSYS_COUT_OUTPUT"] = "ON"
+
+        result = self.run_test(
+            mode,
+            "minimal-numa-alloc",
+            env=env,
+            binary_rewrite_args=["--min-instructions", "0"],
+            runtime_instrument_args=["--min-instructions", "0"],
+        )
+        self.assert_regex(result)
+
+        # Both the numa_alloc and numa_free regions carry a "size" trace-arg of
+        # 4096 (two annotations total)
+        self.assert_perfetto(
+            result,
+            subtest_name="Perfetto numa_alloc Args Validation",
+            key_names=["size"],
+            key_counts=[2],
+            pass_regex=[
+                r"key\s*::\s*debug\.size",
+                r":: 4096",
+            ],
+        )
+
+        self.assert_rocpd(
+            result,
+            subtest_name="ROCpd numa_alloc Args Validation",
+            rules_files=numa_alloc_rules,
+        )
+
+    @pytest.mark.rocpd("rocpd_env")
+    @pytest.mark.parametrize("mode", ["binary_rewrite", "runtime_instrument", "sys_run"])
+    def test_pthreads(self, mode, rocpd_env, pthreads_rules):
+        """
+        Ensure that pthread_create gotcha arguments (the incoming arg0
+        annotation and the return value) are stored in the trace cache and
+        surfaced in both perfetto and rocpd.
+        """
+        env = rocpd_env.copy()
+        env["ROCPROFSYS_COUT_OUTPUT"] = "ON"
+
+        result = self.run_test(
+            mode,
+            "minimal-pthreads",
+            env=env,
+            binary_rewrite_args=["--min-instructions", "0"],
+            runtime_instrument_args=["--min-instructions", "0"],
+        )
+        self.assert_regex(result)
+
+        # Both the pthread_create and pthread_join gotcha regions carry a
+        # "return" trace-arg of 0 (two annotations total)
+        self.assert_perfetto(
+            result,
+            subtest_name="Perfetto pthread Return Validation",
+            key_names=["return"],
+            key_counts=[2],
+            pass_regex=[
+                r"key\s*::\s*debug\.return",
+                r"string_value\s*::\s*0",
+            ],
+        )
+
+        # arg0 and return=0 are both validated against the trace-cache-backed
+        # region_args table
+        self.assert_rocpd(
+            result,
+            subtest_name="ROCpd pthread_create Args Validation",
+            rules_files=pthreads_rules,
         )

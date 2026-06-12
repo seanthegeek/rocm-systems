@@ -1,0 +1,35 @@
+{
+    "required_tables": [
+        {
+            "name": "regions",
+            "required_columns": [
+                "name"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than_or_equal",
+                    "description": "The numa_alloc region was recorded",
+                    "error_message": "Expected at least one 'numa_alloc' region from the numa gotcha.",
+                    "expected_result": 1,
+                    "query": "SELECT COUNT(*) FROM regions WHERE name = 'numa_alloc'"
+                }
+            ]
+        },
+        {
+            "name": "region_args",
+            "required_columns": [
+                "name",
+                "value"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than_or_equal",
+                    "description": "The numa_alloc region carries a size trace-arg of 4096",
+                    "error_message": "Expected the numa_alloc region to record a 'size' trace-arg equal to 4096.",
+                    "expected_result": 1,
+                    "query": "SELECT COUNT(*) FROM region_args A INNER JOIN regions R ON R.id = A.id AND R.guid = A.guid WHERE R.name = 'numa_alloc' AND A.name = 'size' AND A.value = '4096'"
+                }
+            ]
+        }
+    ]
+}

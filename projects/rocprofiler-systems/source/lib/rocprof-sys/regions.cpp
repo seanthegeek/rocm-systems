@@ -43,6 +43,8 @@ invoke_category_region_start(rocprofsys_category_t _category, const char* name,
                         tracing::add_perfetto_annotation(ctx, _annotations[i]);
                 }
             });
+        component::category_region<category_type>::append_cache_args(
+            name, serialize_annotation_args(_annotations, _annotation_count));
     }
     else
     {
