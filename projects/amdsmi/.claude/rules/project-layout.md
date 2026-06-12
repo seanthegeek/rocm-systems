@@ -1,5 +1,5 @@
 ---
-description: "Use when: reviewing API changes, adding/modifying amdsmi_* functions, checking cascade integrity, API renames, new C API functions, working with generator.py, update_wrapper.sh, amdsmi_wrapper.py, code generation, wrapper regeneration, navigating the codebase, finding source files, understanding project layout, onboarding, running tests, writing tests, checking test coverage, finding test files, modifying CMakeLists.txt, packaging, RPM/DEB scripts, build configuration, cmake options."
+description: "Use when: reviewing API changes, adding/modifying amdsmi_* functions, checking cascade integrity, API renames, new C API functions, working with generator.py, update_wrapper.sh, amdsmi_wrapper.py, code generation, wrapper regeneration, navigating the codebase, finding source files, understanding project layout, onboarding, running tests, writing tests, checking test coverage, finding test files, modifying CMakeLists.txt, packaging, RPM/DEB scripts, build configuration, cmake options, needing a documentation overview, llms.txt, llms-full.txt, generate_llms.py."
 ---
 # Project Layout
 
@@ -60,6 +60,21 @@ Missing results = cascade gap.
 | `update_wrapper.sh` | Regenerates `py-interface/amdsmi_wrapper.py` (Docker + `generator.py`) |
 | `update_rust_wrapper.sh` | Regenerates Rust bindings |
 | `run-clang-tidy.sh` | Runs clang-tidy on C++ sources |
+
+# Documentation (`docs/`)
+
+Sphinx docs published to rocm.docs.amd.com. Two LLM-oriented indexes are
+**auto-generated** at build time by `docs/generate_llms.py` — never hand-edit them:
+
+| File | Purpose |
+|------|---------|
+| `docs/llms.txt` | Curated link index of the docs (the [llms.txt standard](https://llmstxt.org/)) |
+| `docs/llms-full.txt` | Every prose doc inlined into one file |
+
+**Need docs context?** Read `docs/llms-full.txt` (all prose in one file) or
+`docs/llms.txt` (link index) instead of crawling `docs/` page by page. Both are
+derived from `docs/sphinx/_toc.yml.in` + each page's `html_meta` description (so
+they never drift) and publish at the docs site root (`/llms.txt`, `/llms-full.txt`).
 
 # Tests
 
