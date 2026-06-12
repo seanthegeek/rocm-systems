@@ -65,7 +65,7 @@ jobs:
 
           ROCM_ROOT="$(rocm-sdk path --root)"
           ROCM_BIN="$(rocm-sdk path --bin)"
-          ROCM_LIB="$(rocm-sdk path --lib)"
+          ROCM_LIB="$(rocm-sdk path --root)"/lib
           LLVM_BIN="${ROCM_ROOT}/lib/llvm/bin"
           ROCM_SYSDEPS="${ROCM_ROOT}/lib/rocm_sysdeps"
 
