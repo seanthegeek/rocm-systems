@@ -10,12 +10,14 @@
 #include "hipfile.h"
 #include "state.h"
 
+#include <bit>
 #include <cstddef>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -66,18 +68,27 @@ BatchOperation::BatchOperation(std::unique_ptr<const hipFileIOParams_t> params,
         throw std::invalid_argument(msg.str());
     }
 
+    // These enums have no fixed underlying type, so loading an out-of-range
+    // value (e.g. one passed in by a misbehaving caller) is UB and trips
+    // UBSan's enum check. Read the raw bits as the underlying integer instead
+    // so we can validate the value and report it via std::invalid_argument.
+    // The underlying type's signedness is implementation-defined, so widen to
+    // a signed type for the message to keep e.g. -1 readable across platforms.
+    const auto opcode_raw = std::bit_cast<std::underlying_type_t<hipFileOpcode_t>>(io_params->opcode);
+    const auto mode_raw   = std::bit_cast<std::underlying_type_t<hipFileBatchMode_t>>(io_params->mode);
+
     // Check OpCode
-    if (io_params->opcode != hipFileBatchRead && io_params->opcode != hipFileBatchWrite) {
+    if (opcode_raw != hipFileBatchRead && opcode_raw != hipFileBatchWrite) {
         std::stringstream msg;
-        msg << "Bad opcode specified. Value: " << io_params->opcode;
+        msg << "Bad opcode specified. Value: " << static_cast<long long>(opcode_raw);
         msg << ". Cookie: " << io_params->cookie;
         throw std::invalid_argument(msg.str());
     }
 
     // Check Batch Mode
-    if (io_params->mode != hipFileBatch) {
+    if (mode_raw != hipFileBatch) {
         std::stringstream msg;
-        msg << "Invalid Batch mode specified. Value: " << io_params->mode;
+        msg << "Invalid Batch mode specified. Value: " << static_cast<long long>(mode_raw);
         msg << ". Cookie: " << io_params->cookie;
         throw std::invalid_argument(msg.str());
     }
