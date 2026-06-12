@@ -1162,7 +1162,7 @@ def test_calc_pc_sampling_data_missing_file(
 ) -> None:
     """Workloads without ps_file_results.json are skipped, returning an empty map."""
     instance = make_db_analysis(str(tmp_path))
-    assert instance.calc_pc_sampling_data() == {}
+    assert instance.calc_pc_sampling_data({str(tmp_path): None}) == {}
 
 
 @pytest.mark.parametrize("placement", ["stochastic", "host_trap", "mixed"])
@@ -1203,7 +1203,9 @@ def test_calc_pc_sampling_data_aggregation(
         **kwargs,
     )
     instance = make_db_analysis(str(tmp_path))
-    result = instance.calc_pc_sampling_data()
+    result = instance.calc_pc_sampling_data({
+        str(tmp_path): load_pc_sampling_results(str(tmp_path))
+    })
 
     expected_columns = [
         "offset",
@@ -1248,7 +1250,9 @@ def test_calc_pc_sampling_data_shared_code_object_kernel_names(
         kernel_dispatch=[make_dispatch(0, 100), make_dispatch(1, 101)],
     )
     instance = make_db_analysis(str(tmp_path))
-    df = instance.calc_pc_sampling_data()[str(tmp_path)]
+    df = instance.calc_pc_sampling_data({
+        str(tmp_path): load_pc_sampling_results(str(tmp_path))
+    })[str(tmp_path)]
     by_offset = dict(zip(df["offset"], df["kernel_name"]))
     assert by_offset[0x10] == "vecCopy"
     assert by_offset[0x20] == "vecAdd"
@@ -1284,7 +1288,9 @@ def test_calc_pc_sampling_data_unmapped_kernel(
         kernel_symbols=[make_kernel_symbol(100, 100, "vecCopy")],
     )
     instance = make_db_analysis(str(tmp_path))
-    df = instance.calc_pc_sampling_data()[str(tmp_path)]
+    df = instance.calc_pc_sampling_data({
+        str(tmp_path): load_pc_sampling_results(str(tmp_path))
+    })[str(tmp_path)]
     assert df.iloc[0]["kernel_name"] is None
 
 
