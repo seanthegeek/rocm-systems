@@ -52,9 +52,15 @@ html_theme_options = {"flavor": "rocm"}
 html_title = f"AMD SMI {version}"
 html_static_path = ["static"]
 html_css_files = ["amdsmi_docs.css"]
+# Publish the llms.txt standard files (https://llmstxt.org/) at the site root so
+# AI assistants can discover them at /llms.txt and /llms-full.txt. Both files are
+# generated from the documentation sources at build time by generate_llms.py
+# (wired up in setup() below) so they never drift from the docs.
+html_extra_path = ["llms.txt", "llms-full.txt"]
 
 # Extension-related settings
 sys.path.append(str(DOCS_DIR / "extension"))
+sys.path.append(str(DOCS_DIR))
 extensions = [
     "rocm_docs",
     "rocm_docs.doxygen",
@@ -114,6 +120,14 @@ def generate_doxyfile(_app, _config):
     doxyfile_out.write_text(content)
 
 
+def generate_llms_txt(_app, _config):
+    """Generate llms.txt / llms-full.txt from the docs (see generate_llms.py)."""
+    import generate_llms
+
+    generate_llms.write_all(version)
+
+
 def setup(app):
     app.connect("config-inited", generate_doxyfile, priority=100)
+    app.connect("config-inited", generate_llms_txt, priority=100)
     return {"parallel_read_safe": True, "parallel_write_safe": True}
