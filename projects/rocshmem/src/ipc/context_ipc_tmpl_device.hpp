@@ -198,6 +198,7 @@ __device__ void IPCContext::internal_direct_allreduce(
       if (is_thread_zero_in_block()) {
         fence(i);
         internal_putmem(&pSync[pe], &flag_val, sizeof(*pSync), i);
+        fence(i);
       }
     }
   }
