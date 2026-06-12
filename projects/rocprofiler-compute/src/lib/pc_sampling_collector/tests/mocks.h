@@ -52,7 +52,7 @@ public:
 
     const std::vector<mem_code_object_info_t>&  get_mem_code_object_info() const;
     const std::vector<file_code_object_info_t>& get_file_code_object_info() const;
-    // (object_id, virtual_address) pairs passed to get_instruction, in call order.
+    // get_instruction queries, in call order.
     const std::vector<std::pair<size_t, uint64_t>>& get_instruction_queries() const;
 
 private:

@@ -117,11 +117,9 @@ TEST_F(test_pc_sampling_collector_t, WriteSamples_InternsAndRoutesByKind)
     const auto  json = nlohmann::json::parse(writer.get_result());
     const auto& root = json["rocprofiler-sdk-tool"][0];
 
-    // One sample landed in each kind-specific bucket.
     ASSERT_EQ(root["buffer_records"]["pc_sample_stochastic"].size(), 1u);
     ASSERT_EQ(root["buffer_records"]["pc_sample_host_trap"].size(), 1u);
 
-    // Both resolved to the same interned instruction string at index 0.
     EXPECT_EQ(root["buffer_records"]["pc_sample_stochastic"][0]["inst_index"], 0);
     EXPECT_EQ(root["buffer_records"]["pc_sample_host_trap"][0]["inst_index"], 0);
     ASSERT_EQ(root["strings"]["pc_sample_instructions"].size(), 1u);
@@ -200,7 +198,7 @@ TEST_F(test_pc_sampling_collector_t, SnapshotSources_CopiesSourcesParsedFromInst
     m_pc_sampling_collector->on_code_object_load(m_mem_info);
     const std::vector<symbol_t> symbols = {{"name0", 0x10, 0x1000, 1}};
     m_translator->add_symbols(m_mem_info.code_object_id, symbols);
-    // for_each_instruction visits this instruction; its comment parses to rel_src.
+    // Comment parses to rel_src.
     m_translator->add_instruction({"v_add", rel_src.string() + ":7", 0x1000, 0x10, 1});
 
     const size_t copied = m_pc_sampling_collector->snapshot_sources(out_root);

@@ -19,8 +19,6 @@
 
 using namespace rocprofiler_compute_tool;
 
-//////////////////////////////////////////////////////////////////////////
-/// (a) ENV READ
 TEST_F(TestPcSamplingInput, EnvInputParameters_PcSamplingInterval_ReturnInjectedValue)
 {
     Envp               envp{{"ROCPROF_PC_SAMPLING_INTERVAL=1048576"}};
@@ -37,8 +35,6 @@ TEST_F(TestPcSamplingInput, EnvInputParameters_PcSamplingIntervalUnset_ReturnEmp
     EXPECT_EQ(input_parameters.get_pc_sampling_interval(), std::string_view{""});
 }
 
-//////////////////////////////////////////////////////////////////////////
-/// (b) MOCK ROUND-TRIP
 TEST_F(TestPcSamplingInput, MockInputParameters_SetPcSamplingInterval_RoundTrips)
 {
     m_input_parameters->set_pc_sampling_interval("256");
@@ -50,8 +46,6 @@ TEST_F(TestPcSamplingInput, MockInputParameters_PcSamplingInterval_DefaultEmpty)
     EXPECT_EQ(m_input_parameters->get_pc_sampling_interval(), std::string_view{""});
 }
 
-//////////////////////////////////////////////////////////////////////////
-/// (c) WIRING RECORDS CALLS
 TEST_F(TestPcSamplingInput, OnHsaRuntimeLoaded_SupportingAgent_CreatesBufferAndConfiguresService)
 {
     constexpr rocprofiler_agent_id_t agent{42};
@@ -79,8 +73,6 @@ TEST_F(TestPcSamplingInput, OnHsaRuntimeLoaded_SupportingAgent_CreatesBufferAndC
               ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH);
 }
 
-//////////////////////////////////////////////////////////////////////////
-/// (d) WARN-AND-CONTINUE
 TEST_F(TestPcSamplingInput, OnHsaRuntimeLoaded_ConfigureReturnsError_DoesNotThrowAndStillAttempts)
 {
     constexpr rocprofiler_agent_id_t agent{7};
@@ -99,8 +91,6 @@ TEST_F(TestPcSamplingInput, OnHsaRuntimeLoaded_ConfigureReturnsError_DoesNotThro
     EXPECT_EQ(m_sdk_wrapper->get_configure_pc_sampling_info().size(), 1u);
 }
 
-//////////////////////////////////////////////////////////////////////////
-/// (e) INTERVAL FALLBACK
 TEST_F(TestPcSamplingInput, OnHsaRuntimeLoaded_IntervalEnvUnset_UsesValueWithinAdvertisedRange)
 {
     constexpr rocprofiler_agent_id_t agent{99};
@@ -157,8 +147,6 @@ TEST_F(TestPcSamplingInput, OnHsaRuntimeLoaded_IntervalTrailingGarbage_FallsBack
     EXPECT_EQ(configured_interval_for("100abc", 64, 4096), 64u);
 }
 
-//////////////////////////////////////////////////////////////////////////
-/// (f) MULTI-AGENT: every supporting agent is configured
 TEST_F(TestPcSamplingInput, OnHsaRuntimeLoaded_MultipleSupportingAgents_ConfiguresEach)
 {
     constexpr rocprofiler_agent_id_t agent_a{11};
@@ -179,8 +167,6 @@ TEST_F(TestPcSamplingInput, OnHsaRuntimeLoaded_MultipleSupportingAgents_Configur
     EXPECT_EQ(m_sdk_wrapper->get_configure_pc_sampling_info()[1].agent.handle, agent_b.handle);
 }
 
-//////////////////////////////////////////////////////////////////////////
-/// (g) UNSUPPORTED METHOD: agent advertises a different method -> skipped, not configured
 TEST_F(TestPcSamplingInput, OnHsaRuntimeLoaded_AgentLacksRequestedMethod_SkipsConfigure)
 {
     constexpr rocprofiler_agent_id_t agent{33};
@@ -198,8 +184,6 @@ TEST_F(TestPcSamplingInput, OnHsaRuntimeLoaded_AgentLacksRequestedMethod_SkipsCo
     EXPECT_TRUE(m_sdk_wrapper->get_configure_pc_sampling_info().empty());
 }
 
-//////////////////////////////////////////////////////////////////////////
-/// (h) DISABLED BY DEFAULT: beta unset -> no service configured
 TEST_F(TestPcSamplingInput, OnHsaRuntimeLoaded_BetaDisabled_ConfiguresNothing)
 {
     constexpr rocprofiler_agent_id_t agent{44};
@@ -217,8 +201,6 @@ TEST_F(TestPcSamplingInput, OnHsaRuntimeLoaded_BetaDisabled_ConfiguresNothing)
     EXPECT_TRUE(m_sdk_wrapper->get_configure_pc_sampling_info().empty());
 }
 
-//////////////////////////////////////////////////////////////////////////
-/// TestPcSamplingInput
 void TestPcSamplingInput::SetUp()
 {
     m_input_parameters = std::make_shared<MockInputParameters>();

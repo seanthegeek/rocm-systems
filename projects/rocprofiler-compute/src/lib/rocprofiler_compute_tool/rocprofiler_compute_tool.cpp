@@ -142,7 +142,6 @@ void pc_sampling_buffer_callback(rocprofiler_context_id_t /*context*/,
         return;
 
     std::lock_guard<std::mutex> lock(tool->mut);
-    // The feature owns the collector that the writer serializes from.
     for (const auto& rec : decoded)
         tool->pc_sampling.append_sample(rec);
 }
@@ -201,7 +200,6 @@ rocprofiler_status_t pc_sampling_config_cb(const rocprofiler_pc_sampling_configu
     {
         if (!query->found)
         {
-            // Default to the first configuration the agent reports.
             query->found        = true;
             query->min_interval = configs[i].min_interval;
             query->max_interval = configs[i].max_interval;
@@ -210,7 +208,6 @@ rocprofiler_status_t pc_sampling_config_cb(const rocprofiler_pc_sampling_configu
         }
         if (configs[i].method == query->requested_method)
         {
-            // Prefer the configuration that matches the requested method.
             query->supported_method_found = true;
             query->min_interval           = configs[i].min_interval;
             query->max_interval           = configs[i].max_interval;

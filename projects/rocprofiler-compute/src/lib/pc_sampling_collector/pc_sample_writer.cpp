@@ -157,7 +157,7 @@ nlohmann::json common_record_to_json(const pc_sample_record_t& r)
 
 nlohmann::json stochastic_record_to_json(const pc_sample_record_t& r)
 {
-    // Stochastic adds flags + the stochastic-only fields on top of the common base.
+    // Stochastic-only fields on top of the common base.
     auto out           = common_record_to_json(r);
     out["flags"]       = nlohmann::json::object({{"has_mem_cnt", r.flags.has_mem_cnt}});
     out["wave_issued"] = r.wave_issued;

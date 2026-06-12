@@ -13,7 +13,7 @@
 class test_pc_sample_decode_t : public ::testing::Test
 {
 protected:
-    // Build a fully-populated stochastic record with distinctive values.
+    // Fully-populated stochastic record.
     static rocprofiler_pc_sampling_record_stochastic_v0_t make_stochastic_record()
     {
         rocprofiler_pc_sampling_record_stochastic_v0_t rec{};

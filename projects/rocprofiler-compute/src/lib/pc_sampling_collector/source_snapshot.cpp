@@ -37,9 +37,7 @@ size_t rocprofiler_compute_tool::source_snapshot_impl_t::snapshot(
         unique_refs.insert(ref);
     }
 
-    // Source refs come from ISA debug comments of the profiled binary, so they
-    // are untrusted. Only read files that resolve inside allowed_root (the
-    // project tree), and only write inside code_obj_sources.
+    // Refs are untrusted (from ISA debug comments); see header for the read/write bounds.
     std::error_code root_ec;
     const auto      canon_allowed_root = std::filesystem::weakly_canonical(allowed_root, root_ec);
     const auto      canon_sources_root = std::filesystem::weakly_canonical(sources_root, root_ec);
@@ -56,8 +54,7 @@ size_t rocprofiler_compute_tool::source_snapshot_impl_t::snapshot(
         std::error_code             ec;
         const std::filesystem::path src{ref};
 
-        // Resolve the source (following any symlinks) and require it to live
-        // inside the project tree, rejecting absolute escapes like /etc/passwd.
+        // Resolve symlinks and require the source inside allowed_root (rejects /etc/passwd).
         const auto canon_src = std::filesystem::weakly_canonical(src, ec);
         if (ec || canon_allowed_root.empty() || !is_inside(canon_allowed_root, canon_src))
         {
@@ -68,7 +65,6 @@ size_t rocprofiler_compute_tool::source_snapshot_impl_t::snapshot(
             continue;
         }
 
-        // Strip any leading '/' so the ref nests under code_obj_sources.
         std::string relative = ref;
         while (!relative.empty() && relative.front() == '/')
         {

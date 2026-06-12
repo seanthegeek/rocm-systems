@@ -33,8 +33,6 @@ bool copied_somewhere_with_tail(const std::filesystem::path& code_obj_sources,
 }
 }  // namespace
 
-// ---- parse_ref ----
-
 TEST_F(test_source_snapshot_t, ParseSourceRef_PathBeforeLastColon)
 {
     EXPECT_EQ(m_snapshotter.parse_ref("foo/bar.cpp:42"), std::optional<std::string>{"foo/bar.cpp"});
@@ -51,8 +49,6 @@ TEST_F(test_source_snapshot_t, ParseSourceRef_LeadingColonOrEmpty_ReturnsNullopt
     EXPECT_EQ(m_snapshotter.parse_ref(":30"), std::nullopt);
     EXPECT_EQ(m_snapshotter.parse_ref(""), std::nullopt);
 }
-
-// ---- snapshot ----
 
 TEST_F(test_source_snapshot_t, SnapshotSourceFiles_CopiesExistingFilesPreservingTail)
 {
@@ -117,14 +113,12 @@ TEST_F(test_source_snapshot_t, SnapshotSourceFiles_RefOutsideAllowedRoot_IsRejec
     const auto outside = m_tmp_root / "secret.txt";
     write_file(outside, "secret\n");
 
-    // allowed_root is m_tmp_root/proj, so a ref to m_tmp_root/secret.txt is out of bounds.
     const auto allowed_root = m_tmp_root / "proj";
 
     size_t copied = 0;
     EXPECT_NO_THROW(copied = m_snapshotter.snapshot({outside.string()}, m_output_root, allowed_root));
 
     EXPECT_EQ(copied, 0u);
-    // The out-of-root file is not copied anywhere under code_obj_sources.
     EXPECT_FALSE(copied_somewhere_with_tail(m_output_root / "code_obj_sources", outside, "secret\n"));
 }
 

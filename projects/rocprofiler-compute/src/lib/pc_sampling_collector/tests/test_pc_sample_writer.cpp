@@ -9,7 +9,6 @@
 #include <filesystem>
 #include <fstream>
 
-// (a) top key "rocprofiler-sdk-tool" is a 1-element array.
 TEST_F(test_pc_sample_writer_t, ProvidedBegin_TopKeyIsSingleElementArray)
 {
     m_writer.begin();
@@ -20,8 +19,6 @@ TEST_F(test_pc_sample_writer_t, ProvidedBegin_TopKeyIsSingleElementArray)
     EXPECT_EQ(json["rocprofiler-sdk-tool"].size(), 1u);
 }
 
-// (b) A stochastic record lands in buffer_records.pc_sample_stochastic[0] with
-//     inst_index as a sibling of record and all distinctive fields serialized.
 TEST_F(test_pc_sample_writer_t, ProvidedStochasticRecord_SerializesUnderStochasticBuffer)
 {
     const auto record = make_stochastic_record();
@@ -43,10 +40,8 @@ TEST_F(test_pc_sample_writer_t, ProvidedStochasticRecord_SerializesUnderStochast
     const auto& rec = entry["record"];
     ASSERT_FALSE(rec.contains("inst_index"));
 
-    // flags
     EXPECT_EQ(rec["flags"]["has_mem_cnt"], record.flags.has_mem_cnt);
 
-    // hw_id (all members)
     EXPECT_EQ(rec["hw_id"]["chiplet"], record.hw_id.chiplet);
     EXPECT_EQ(rec["hw_id"]["wave_id"], record.hw_id.wave_id);
     EXPECT_EQ(rec["hw_id"]["simd_id"], record.hw_id.simd_id);
@@ -59,20 +54,16 @@ TEST_F(test_pc_sample_writer_t, ProvidedStochasticRecord_SerializesUnderStochast
     EXPECT_EQ(rec["hw_id"]["queue_id"], record.hw_id.queue_id);
     EXPECT_EQ(rec["hw_id"]["microengine_id"], record.hw_id.microengine_id);
 
-    // pc
     EXPECT_EQ(rec["pc"]["code_object_id"], record.pc.code_object_id);
     EXPECT_EQ(rec["pc"]["code_object_offset"], record.pc.code_object_offset);
 
-    // scalars
     EXPECT_EQ(rec["exec_mask"], record.exec_mask);
     EXPECT_EQ(rec["timestamp"], record.timestamp);
     EXPECT_EQ(rec["dispatch_id"], record.dispatch_id);
 
-    // corr_id
     EXPECT_EQ(rec["corr_id"]["internal"], record.corr_id.internal);
     EXPECT_EQ(rec["corr_id"]["external"], record.corr_id.external);
 
-    // wrkgrp_id
     EXPECT_EQ(rec["wrkgrp_id"]["x"], record.wrkgrp_id.x);
     EXPECT_EQ(rec["wrkgrp_id"]["y"], record.wrkgrp_id.y);
     EXPECT_EQ(rec["wrkgrp_id"]["z"], record.wrkgrp_id.z);
@@ -119,8 +110,6 @@ TEST_F(test_pc_sample_writer_t, ProvidedStochasticRecord_SerializesUnderStochast
     EXPECT_EQ(snap["arb_state_stall_brmsg"], record.snapshot.arb_state_stall_brmsg);
 }
 
-// (c) A host_trap record lands under pc_sample_host_trap[0] and the record has
-//     NO snapshot / wave_cnt / inst_type keys.
 TEST_F(test_pc_sample_writer_t, ProvidedHostTrapRecord_SerializesWithoutStochasticOnlyFields)
 {
     const auto record = make_host_trap_record();
@@ -142,7 +131,6 @@ TEST_F(test_pc_sample_writer_t, ProvidedHostTrapRecord_SerializesWithoutStochast
     EXPECT_FALSE(rec.contains("wave_cnt"));
     EXPECT_FALSE(rec.contains("inst_type"));
 
-    // Host-trap fields that should still be present.
     ASSERT_TRUE(rec.contains("hw_id"));
     ASSERT_TRUE(rec.contains("pc"));
     EXPECT_EQ(rec["exec_mask"], record.exec_mask);
@@ -154,7 +142,6 @@ TEST_F(test_pc_sample_writer_t, ProvidedHostTrapRecord_SerializesWithoutStochast
     EXPECT_EQ(rec["wave_in_grp"], record.wave_in_grp);
 }
 
-// (d) set_strings -> strings.pc_sample_instructions / pc_sample_comments.
 TEST_F(test_pc_sample_writer_t, ProvidedInternedStrings_SerializesInstructionsAndComments)
 {
     rocprofiler_compute_tool::pc_string_interner_t interner;
@@ -178,7 +165,6 @@ TEST_F(test_pc_sample_writer_t, ProvidedInternedStrings_SerializesInstructionsAn
     EXPECT_EQ(strings["pc_sample_comments"][1], "b.cpp:2");
 }
 
-// (e) set_kernel_symbols -> kernel_symbols array entries.
 TEST_F(test_pc_sample_writer_t, ProvidedKernelSymbols_SerializesThemInOrder)
 {
     const std::vector<rocprofiler_compute_tool::kernel_symbol_entry_t> syms{
@@ -199,7 +185,6 @@ TEST_F(test_pc_sample_writer_t, ProvidedKernelSymbols_SerializesThemInOrder)
     EXPECT_EQ(kernel_symbols[1]["formatted_kernel_name"], "bar");
 }
 
-// (f) Every API-trace category is present and is an empty array.
 TEST_F(test_pc_sample_writer_t, ProvidedNoApiTraces_AllApiCategoriesAreEmptyArrays)
 {
     m_writer.begin();
@@ -224,7 +209,6 @@ TEST_F(test_pc_sample_writer_t, ProvidedNoApiTraces_AllApiCategoriesAreEmptyArra
     }
 }
 
-// (g) Fresh begin() with no records: valid JSON, empty stochastic/host_trap arrays.
 TEST_F(test_pc_sample_writer_t, ProvidedNoRecords_ReturnsValidJsonWithEmptySampleArrays)
 {
     m_writer.begin();
@@ -243,16 +227,14 @@ TEST_F(test_pc_sample_writer_t, ProvidedNoRecords_ReturnsValidJsonWithEmptySampl
     EXPECT_EQ(buffer_records["pc_sample_host_trap"].size(), 0u);
 }
 
-// (h) flush("") throws std::runtime_error.
 TEST_F(test_pc_sample_writer_t, ProvidedEmptyOutputFilePath_Throws)
 {
     m_writer.begin();
     EXPECT_THROW(m_writer.flush(""), std::runtime_error);
 }
 
-// (i) flush to an unwritable path throws (consistent I/O failure contract) and
-//     does not silently no-op. generate_output()'s finalize() wrapper catches
-//     this so the process never aborts.
+// flush to an unwritable path throws rather than silently no-op'ing;
+// generate_output()'s finalize() wrapper catches it so the process never aborts.
 TEST_F(test_pc_sample_writer_t, ProvidedUnopenableOutputFilePath_Throws)
 {
     m_writer.begin();
@@ -269,8 +251,8 @@ TEST_F(test_pc_sample_writer_t, ProvidedUnopenableOutputFilePath_Throws)
     std::filesystem::remove(tmp, ec);
 }
 
-// (j) Cross-language contract: pin the exact key path the Python analyze side
-//     (analysis_db.calc_pc_sampling_data) reads, so a rename here fails loudly.
+// Cross-language contract: pin the exact key path the Python analyze side
+// (analysis_db.calc_pc_sampling_data) reads, so a rename here fails loudly.
 TEST_F(test_pc_sample_writer_t, SerializesContractKeyPathConsumedByAnalyze)
 {
     const auto stochastic = make_stochastic_record();
@@ -288,7 +270,6 @@ TEST_F(test_pc_sample_writer_t, SerializesContractKeyPathConsumedByAnalyze)
 
     const auto json = nlohmann::json::parse(m_writer.get_result());
 
-    // rocprofiler-sdk-tool[0] -> the nested keys analyze depends on.
     ASSERT_TRUE(json["rocprofiler-sdk-tool"].is_array());
     const auto& root = json["rocprofiler-sdk-tool"][0];
 
@@ -311,8 +292,6 @@ TEST_F(test_pc_sample_writer_t, SerializesContractKeyPathConsumedByAnalyze)
     EXPECT_EQ(k["formatted_kernel_name"], "my_kernel(int)");
 }
 
-// (k) set_agents -> non-empty agents[] in the SDK shape the consumer's GPU map
-//     depends on (id.handle, type, node_id, logical_node_id, ...).
 TEST_F(test_pc_sample_writer_t, ProvidedAgents_SerializesThemInSdkShape)
 {
     const auto agent = make_agent_record();
@@ -338,9 +317,6 @@ TEST_F(test_pc_sample_writer_t, ProvidedAgents_SerializesThemInSdkShape)
     EXPECT_EQ(a["simd_count"], agent.simd_count);
 }
 
-// (l) set_kernel_dispatches -> non-empty buffer_records.kernel_dispatch[] with
-//     the SDK field shape (timestamps + nested dispatch_info) the consumer needs
-//     to attribute PC samples to kernels.
 TEST_F(test_pc_sample_writer_t, ProvidedKernelDispatches_SerializesThemInSdkShape)
 {
     const auto dispatch = make_kernel_dispatch_record();
@@ -380,7 +356,6 @@ TEST_F(test_pc_sample_writer_t, ProvidedKernelDispatches_SerializesThemInSdkShap
     EXPECT_EQ(di["grid_size"]["z"], dispatch.grid_size.z);
 }
 
-// (m) kernel_symbols entries now carry kernel_id alongside code_object_id/name.
 TEST_F(test_pc_sample_writer_t, ProvidedKernelSymbols_SerializesKernelId)
 {
     m_writer.begin();
