@@ -115,4 +115,43 @@ protected:
         r.inst_index = 8;
         return r;
     }
+
+    static rocprofiler_compute_tool::agent_record_t make_agent_record()
+    {
+        rocprofiler_compute_tool::agent_record_t a{};
+        a.size            = 312;
+        a.id_handle       = 18942;
+        a.type            = 2;  // GPU
+        a.node_id         = 2;
+        a.logical_node_id = 2;
+        a.cu_count        = 304;
+        a.gpu_id          = 4567;
+        a.wave_front_size = 64;
+        a.simd_count      = 1216;
+        return a;
+    }
+
+    static rocprofiler_compute_tool::kernel_dispatch_record_t make_kernel_dispatch_record()
+    {
+        rocprofiler_compute_tool::kernel_dispatch_record_t d{};
+        d.size            = 184;
+        d.kind            = 11;
+        d.operation       = 2;
+        d.thread_id       = 298597;
+        d.corr_internal   = 1;
+        d.corr_external   = 0;
+        d.start_timestamp = 1987779595190273ULL;
+        d.end_timestamp   = 1987779595198565ULL;
+
+        d.dispatch_info_size   = 72;
+        d.agent_id_handle      = 18942;
+        d.queue_id_handle      = 2;
+        d.kernel_id            = 12;
+        d.dispatch_id          = 1;
+        d.private_segment_size = 0;
+        d.group_segment_size   = 0;
+        d.workgroup_size       = {256, 1, 1};
+        d.grid_size            = {1048576, 1, 1};
+        return d;
+    }
 };

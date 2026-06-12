@@ -359,7 +359,7 @@ void SdkCallbacksImpl::tool_tracing_callback(rocprofiler_callback_tracing_record
             }
             if (formatted_name.empty() && data->kernel_name != nullptr)
                 formatted_name = data->kernel_name;
-            tool->pc_sampling.add_kernel_symbol(data->code_object_id, formatted_name);
+            tool->pc_sampling.add_kernel_symbol(data->code_object_id, formatted_name, data->kernel_id);
         }
 
         if (!tool->kernel_filter_include_regex.empty())

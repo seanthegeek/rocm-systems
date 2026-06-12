@@ -158,3 +158,41 @@ void SdkWrapperImpl::flush_buffer(rocprofiler_buffer_id_t buffer_id)
 {
     ROCPROFILER_CALL(rocprofiler_flush_buffer(buffer_id), "flush buffer");
 }
+
+void SdkWrapperImpl::configure_buffer_tracing_service(rocprofiler_context_id_t          context_id,
+                                                      rocprofiler_buffer_tracing_kind_t kind,
+                                                      rocprofiler_buffer_id_t           buffer_id)
+{
+    ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(context_id, kind, nullptr, 0, buffer_id),
+                     "configure buffer tracing service");
+}
+
+void SdkWrapperImpl::query_agent_records(std::vector<agent_record_t>& out_agents)
+{
+    ROCPROFILER_CALL(
+        rocprofiler_query_available_agents(
+            ROCPROFILER_AGENT_INFO_VERSION_0,
+            [](rocprofiler_agent_version_t, const void** agents, size_t num_agents, void* user_data)
+            {
+                auto* out = static_cast<std::vector<agent_record_t>*>(user_data);
+                for (size_t i = 0; i < num_agents; ++i)
+                {
+                    const auto*    agent = static_cast<const rocprofiler_agent_v0_t*>(agents[i]);
+                    agent_record_t rec{};
+                    rec.size            = agent->size;
+                    rec.id_handle       = agent->id.handle;
+                    rec.type            = static_cast<uint32_t>(agent->type);
+                    rec.node_id         = agent->node_id;
+                    rec.logical_node_id = agent->logical_node_id;
+                    rec.cu_count        = agent->cu_count;
+                    rec.gpu_id          = agent->gpu_id;
+                    rec.wave_front_size = agent->wave_front_size;
+                    rec.simd_count      = agent->simd_count;
+                    out->push_back(rec);
+                }
+                return ROCPROFILER_STATUS_SUCCESS;
+            },
+            sizeof(rocprofiler_agent_v0_t),
+            static_cast<void*>(&out_agents)),
+        "query available agents");
+}

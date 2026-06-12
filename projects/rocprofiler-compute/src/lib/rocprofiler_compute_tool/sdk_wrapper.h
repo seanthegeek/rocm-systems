@@ -6,8 +6,11 @@
 #    define ROCPROFILER_SDK_EXPERIMENTAL
 #endif
 
+#include "pc_sample_writer.h"
+
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/buffer.h>
+#include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/pc_sampling.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
@@ -79,6 +82,15 @@ public:
                                                                int                     flags) = 0;
 
     virtual void flush_buffer(rocprofiler_buffer_id_t buffer_id) = 0;
+
+    virtual void configure_buffer_tracing_service(rocprofiler_context_id_t          context_id,
+                                                  rocprofiler_buffer_tracing_kind_t kind,
+                                                  rocprofiler_buffer_id_t           buffer_id) = 0;
+
+    // Enumerates all agents (CPU + GPU) and returns minimal records for the
+    // results JSON. GPU-id mapping (GPU agents sorted by node_id) is the
+    // consumer's responsibility.
+    virtual void query_agent_records(std::vector<agent_record_t>& out_agents) = 0;
 };
 
 class SdkWrapperImpl : public SdkWrapper
@@ -132,5 +144,9 @@ public:
                                                        rocprofiler_buffer_id_t          buffer_id,
                                                        int flags) override;
     void                 flush_buffer(rocprofiler_buffer_id_t buffer_id) override;
+    void configure_buffer_tracing_service(rocprofiler_context_id_t          context_id,
+                                          rocprofiler_buffer_tracing_kind_t kind,
+                                          rocprofiler_buffer_id_t           buffer_id) override;
+    void query_agent_records(std::vector<agent_record_t>& out_agents) override;
 };
 }  // namespace rocprofiler_compute_tool

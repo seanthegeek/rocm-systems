@@ -66,9 +66,17 @@ TEST_F(TestPcSamplingInput, OnHsaRuntimeLoaded_SupportingAgent_CreatesBufferAndC
 
     drive_hsa_runtime_loaded();
 
-    ASSERT_EQ(m_sdk_wrapper->get_create_buffer_info().size(), 1u);
+    // Two buffers are created: one for PC samples and one for the buffered
+    // kernel-dispatch tracing service (the timestamp source for kernel_dispatch
+    // records in the results JSON).
+    ASSERT_EQ(m_sdk_wrapper->get_create_buffer_info().size(), 2u);
     ASSERT_EQ(m_sdk_wrapper->get_configure_pc_sampling_info().size(), 1u);
     EXPECT_EQ(m_sdk_wrapper->get_configure_pc_sampling_info()[0].agent.handle, agent.handle);
+
+    // The kernel-dispatch buffer tracing service was configured exactly once.
+    ASSERT_EQ(m_sdk_wrapper->get_buffer_tracing_service_info().size(), 1u);
+    EXPECT_EQ(m_sdk_wrapper->get_buffer_tracing_service_info()[0].kind,
+              ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH);
 }
 
 //////////////////////////////////////////////////////////////////////////

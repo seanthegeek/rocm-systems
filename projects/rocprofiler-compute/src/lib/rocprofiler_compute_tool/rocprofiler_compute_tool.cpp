@@ -147,6 +147,38 @@ void pc_sampling_buffer_callback(rocprofiler_context_id_t /*context*/,
         tool->pc_sampling.append_sample(rec);
 }
 
+void kernel_dispatch_buffer_callback(rocprofiler_context_id_t /*context*/,
+                                     rocprofiler_buffer_id_t /*buffer_id*/,
+                                     rocprofiler_record_header_t** headers,
+                                     size_t                        num_headers,
+                                     void*                         tool_data,
+                                     uint64_t /*drop_count*/)
+{
+    if (headers == nullptr)
+        return;
+
+    auto* tool = static_cast<std::unique_ptr<tool_data_t>*>(tool_data)->get();
+
+    std::vector<kernel_dispatch_record_t> decoded;
+    decoded.reserve(num_headers);
+    for (size_t i = 0; i < num_headers; ++i)
+    {
+        if (headers[i] == nullptr)
+            continue;
+        auto rec = decode_kernel_dispatch_record(*headers[i]);
+        if (!rec)
+            continue;
+        decoded.push_back(std::move(*rec));
+    }
+
+    if (decoded.empty())
+        return;
+
+    std::lock_guard<std::mutex> lock(tool->mut);
+    for (const auto& rec : decoded)
+        tool->pc_sampling.append_kernel_dispatch(rec);
+}
+
 namespace
 {
 struct pc_sampling_config_query_t
@@ -195,6 +227,13 @@ void setup_pc_sampling(rocprofiler_context_id_t ctx, tool_data_t* tool, void* us
     std::vector<rocprofiler_agent_id_t> agents;
     g_sdk_wrapper->query_available_gpu_agents(agents);
 
+    // Persist agent metadata for the results JSON so the consumer can build its
+    // GPU-id map without an external CSV.
+    std::vector<agent_record_t> agent_records;
+    g_sdk_wrapper->query_agent_records(agent_records);
+    for (const auto& rec : agent_records)
+        tool->pc_sampling.add_agent(rec);
+
     constexpr size_t kBufferSize = 4 * 1024 * 1024;
     g_sdk_wrapper->create_buffer(ctx,
                                  kBufferSize,
@@ -203,6 +242,21 @@ void setup_pc_sampling(rocprofiler_context_id_t ctx, tool_data_t* tool, void* us
                                  pc_sampling_buffer_callback,
                                  user_data,
                                  &tool->pc_sampling_buffer_id);
+
+    // A buffered kernel-dispatch tracing service is the timestamp source: its
+    // records carry start/end_timestamp and full dispatch_info, which the
+    // dispatch counting-service callback does not. Required so the results JSON
+    // can populate buffer_records.kernel_dispatch.
+    g_sdk_wrapper->create_buffer(ctx,
+                                 kBufferSize,
+                                 kBufferSize / 2,
+                                 ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                 kernel_dispatch_buffer_callback,
+                                 user_data,
+                                 &tool->kernel_dispatch_buffer_id);
+    g_sdk_wrapper->configure_buffer_tracing_service(ctx,
+                                                    ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                                                    tool->kernel_dispatch_buffer_id);
 
     const auto requested_method = (tool->pc_sampling.mode() == PcSamplingMode::Stochastic)
                                       ? ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC
@@ -361,6 +415,7 @@ void generate_output(tool_data_t* tool_data)
         try
         {
             g_sdk_wrapper->flush_buffer(tool_data->pc_sampling_buffer_id);
+            g_sdk_wrapper->flush_buffer(tool_data->kernel_dispatch_buffer_id);
             tool_data->pc_sampling.finalize();
         }
         catch (const std::exception& e)
