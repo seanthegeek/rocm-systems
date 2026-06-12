@@ -22,6 +22,7 @@ Project structure and API cascade path are stored in repo memories.
 4. Identify stale or misleading docs/comments in changed code
 5. Verify docs are updated when APIs are renamed or added (architecture subagent owns the full cascade — you only check the docs leg: CLI help text, docstrings, `docs/` content)
 6. **Load `changelog-automation` skill** — check `CHANGELOG.md` is updated for user-visible changes
+7. **Check generated docs indexes** — `docs/llms.txt` and `docs/llms-full.txt` (the [llms.txt standard](https://llmstxt.org/) for AI assistants) are auto-generated at build time by `docs/generate_llms.py`; they are never hand-edited (flag any hand-edit ❌ BLOCKING). When docs pages are added or renamed, verify they are listed in `docs/sphinx/_toc.yml.in` and carry an `html_meta` "description lang=en" so they flow into `docs/llms.txt`.
 
 ## Severity
 
