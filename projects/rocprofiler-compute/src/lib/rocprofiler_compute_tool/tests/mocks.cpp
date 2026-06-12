@@ -313,9 +313,32 @@ void MockSdkWrapper::flush_buffer(rocprofiler_buffer_id_t buffer_id)
     m_flush_buffer_info.push_back(flush_buffer_info{buffer_id.handle});
 }
 
+void MockSdkWrapper::configure_buffer_tracing_service(rocprofiler_context_id_t          context_id,
+                                                      rocprofiler_buffer_tracing_kind_t kind,
+                                                      rocprofiler_buffer_id_t           buffer_id)
+{
+    m_buffer_tracing_service_info.push_back(
+        buffer_tracing_service_info{context_id.handle, kind, buffer_id.handle});
+}
+
+void MockSdkWrapper::query_agent_records(std::vector<rocprofiler_compute_tool::agent_record_t>& out_agents)
+{
+    out_agents = m_agent_records;
+}
+
 void MockSdkWrapper::set_available_gpu_agents(std::vector<rocprofiler_agent_id_t> agents)
 {
     m_gpu_agents = std::move(agents);
+}
+
+void MockSdkWrapper::set_agent_records(std::vector<rocprofiler_compute_tool::agent_record_t> agents)
+{
+    m_agent_records = std::move(agents);
+}
+
+const std::vector<MockSdkWrapper::buffer_tracing_service_info>& MockSdkWrapper::get_buffer_tracing_service_info() const
+{
+    return m_buffer_tracing_service_info;
 }
 
 void MockSdkWrapper::set_pc_sampling_config(size_t                           min_interval,
@@ -380,9 +403,24 @@ void MockPcSamplingCollector::append_sample(const rocprofiler_compute_tool::pc_s
 }
 
 void MockPcSamplingCollector::add_kernel_symbol(uint64_t           code_object_id,
-                                                const std::string& formatted_kernel_name)
+                                                const std::string& formatted_kernel_name,
+                                                uint64_t           kernel_id)
 {
     added_kernel_symbols.emplace_back(code_object_id, formatted_kernel_name);
+    added_kernel_ids.push_back(kernel_id);
+}
+
+void MockPcSamplingCollector::add_agent(const rocprofiler_compute_tool::agent_record_t& agent)
+{
+    ++add_agent_count;
+    added_agents.push_back(agent);
+}
+
+void MockPcSamplingCollector::append_kernel_dispatch(
+    const rocprofiler_compute_tool::kernel_dispatch_record_t& record)
+{
+    ++append_kernel_dispatch_count;
+    appended_kernel_dispatches.push_back(record);
 }
 
 void MockPcSamplingCollector::write_samples(rocprofiler_compute_tool::pc_sample_writer_t& /*writer*/)

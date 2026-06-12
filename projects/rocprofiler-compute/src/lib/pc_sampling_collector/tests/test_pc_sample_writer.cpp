@@ -310,3 +310,85 @@ TEST_F(test_pc_sample_writer_t, SerializesContractKeyPathConsumedByAnalyze)
     EXPECT_EQ(k["code_object_id"], 42u);
     EXPECT_EQ(k["formatted_kernel_name"], "my_kernel(int)");
 }
+
+// (k) set_agents -> non-empty agents[] in the SDK shape the consumer's GPU map
+//     depends on (id.handle, type, node_id, logical_node_id, ...).
+TEST_F(test_pc_sample_writer_t, ProvidedAgents_SerializesThemInSdkShape)
+{
+    const auto agent = make_agent_record();
+
+    m_writer.begin();
+    m_writer.set_agents({agent});
+
+    const auto  json   = nlohmann::json::parse(m_writer.get_result());
+    const auto& agents = json["rocprofiler-sdk-tool"][0]["agents"];
+
+    ASSERT_TRUE(agents.is_array());
+    ASSERT_EQ(agents.size(), 1u);
+
+    const auto& a = agents[0];
+    EXPECT_EQ(a["size"], agent.size);
+    EXPECT_EQ(a["id"]["handle"], agent.id_handle);
+    EXPECT_EQ(a["type"], agent.type);
+    EXPECT_EQ(a["node_id"], agent.node_id);
+    EXPECT_EQ(a["logical_node_id"], agent.logical_node_id);
+    EXPECT_EQ(a["cu_count"], agent.cu_count);
+    EXPECT_EQ(a["gpu_id"], agent.gpu_id);
+    EXPECT_EQ(a["wave_front_size"], agent.wave_front_size);
+    EXPECT_EQ(a["simd_count"], agent.simd_count);
+}
+
+// (l) set_kernel_dispatches -> non-empty buffer_records.kernel_dispatch[] with
+//     the SDK field shape (timestamps + nested dispatch_info) the consumer needs
+//     to attribute PC samples to kernels.
+TEST_F(test_pc_sample_writer_t, ProvidedKernelDispatches_SerializesThemInSdkShape)
+{
+    const auto dispatch = make_kernel_dispatch_record();
+
+    m_writer.begin();
+    m_writer.set_kernel_dispatches({dispatch});
+
+    const auto  json = nlohmann::json::parse(m_writer.get_result());
+    const auto& kd   = json["rocprofiler-sdk-tool"][0]["buffer_records"]["kernel_dispatch"];
+
+    ASSERT_TRUE(kd.is_array());
+    ASSERT_EQ(kd.size(), 1u);
+
+    const auto& d = kd[0];
+    EXPECT_EQ(d["size"], dispatch.size);
+    EXPECT_EQ(d["kind"], dispatch.kind);
+    EXPECT_EQ(d["operation"], dispatch.operation);
+    EXPECT_EQ(d["thread_id"], dispatch.thread_id);
+    EXPECT_EQ(d["correlation_id"]["internal"], dispatch.corr_internal);
+    EXPECT_EQ(d["correlation_id"]["external"], dispatch.corr_external);
+    EXPECT_EQ(d["start_timestamp"], dispatch.start_timestamp);
+    EXPECT_EQ(d["end_timestamp"], dispatch.end_timestamp);
+
+    const auto& di = d["dispatch_info"];
+    EXPECT_EQ(di["size"], dispatch.dispatch_info_size);
+    EXPECT_EQ(di["agent_id"]["handle"], dispatch.agent_id_handle);
+    EXPECT_EQ(di["queue_id"]["handle"], dispatch.queue_id_handle);
+    EXPECT_EQ(di["kernel_id"], dispatch.kernel_id);
+    EXPECT_EQ(di["dispatch_id"], dispatch.dispatch_id);
+    EXPECT_EQ(di["private_segment_size"], dispatch.private_segment_size);
+    EXPECT_EQ(di["group_segment_size"], dispatch.group_segment_size);
+    EXPECT_EQ(di["workgroup_size"]["x"], dispatch.workgroup_size.x);
+    EXPECT_EQ(di["workgroup_size"]["y"], dispatch.workgroup_size.y);
+    EXPECT_EQ(di["workgroup_size"]["z"], dispatch.workgroup_size.z);
+    EXPECT_EQ(di["grid_size"]["x"], dispatch.grid_size.x);
+    EXPECT_EQ(di["grid_size"]["y"], dispatch.grid_size.y);
+    EXPECT_EQ(di["grid_size"]["z"], dispatch.grid_size.z);
+}
+
+// (m) kernel_symbols entries now carry kernel_id alongside code_object_id/name.
+TEST_F(test_pc_sample_writer_t, ProvidedKernelSymbols_SerializesKernelId)
+{
+    m_writer.begin();
+    m_writer.set_kernel_symbols({{7, "foo", 99}});
+
+    const auto  json = nlohmann::json::parse(m_writer.get_result());
+    const auto& k    = json["rocprofiler-sdk-tool"][0]["kernel_symbols"][0];
+    EXPECT_EQ(k["code_object_id"], 7u);
+    EXPECT_EQ(k["formatted_kernel_name"], "foo");
+    EXPECT_EQ(k["kernel_id"], 99u);
+}

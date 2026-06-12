@@ -36,10 +36,14 @@ public:
     virtual void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info) = 0;
     virtual void write(code_object_writer_t& writer) = 0;
 
-    virtual void append_sample(const pc_sample_record_t& record) = 0;
-    virtual void add_kernel_symbol(uint64_t code_object_id, const std::string& formatted_kernel_name) = 0;
-    virtual void   write_samples(pc_sample_writer_t& writer)                  = 0;
-    virtual size_t snapshot_sources(const std::filesystem::path& output_root) = 0;
+    virtual void   append_sample(const pc_sample_record_t& record)                = 0;
+    virtual void   add_kernel_symbol(uint64_t           code_object_id,
+                                     const std::string& formatted_kernel_name,
+                                     uint64_t           kernel_id)                = 0;
+    virtual void   add_agent(const agent_record_t& agent)                         = 0;
+    virtual void   append_kernel_dispatch(const kernel_dispatch_record_t& record) = 0;
+    virtual void   write_samples(pc_sample_writer_t& writer)                      = 0;
+    virtual size_t snapshot_sources(const std::filesystem::path& output_root)     = 0;
 };
 
 class pc_sampling_collector_impl_t : public pc_sampling_collector_t
@@ -49,8 +53,12 @@ public:
     void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info) override;
     void write(code_object_writer_t& writer) override;
 
-    void append_sample(const pc_sample_record_t& record) override;
-    void add_kernel_symbol(uint64_t code_object_id, const std::string& formatted_kernel_name) override;
+    void   append_sample(const pc_sample_record_t& record) override;
+    void   add_kernel_symbol(uint64_t           code_object_id,
+                             const std::string& formatted_kernel_name,
+                             uint64_t           kernel_id) override;
+    void   add_agent(const agent_record_t& agent) override;
+    void   append_kernel_dispatch(const kernel_dispatch_record_t& record) override;
     void   write_samples(pc_sample_writer_t& writer) override;
     size_t snapshot_sources(const std::filesystem::path& output_root) override;
 
@@ -64,10 +72,12 @@ private:
 
     std::shared_ptr<code_object_translator_t> m_translator;
 
-    std::mutex                         m_mutex;
-    std::vector<pc_sample_record_t>    m_samples;
-    std::vector<kernel_symbol_entry_t> m_kernel_symbols;
-    pc_string_interner_t               m_interner;
+    std::mutex                            m_mutex;
+    std::vector<pc_sample_record_t>       m_samples;
+    std::vector<kernel_symbol_entry_t>    m_kernel_symbols;
+    std::vector<agent_record_t>           m_agents;
+    std::vector<kernel_dispatch_record_t> m_kernel_dispatches;
+    pc_string_interner_t                  m_interner;
 };
 
 template<typename Fn>

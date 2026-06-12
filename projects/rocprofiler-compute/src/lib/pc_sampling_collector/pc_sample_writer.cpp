@@ -10,6 +10,7 @@
 #include "json_file_io.h"
 #include "nlohmann/json.hpp"
 
+#include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/pc_sampling.h>
 
@@ -273,6 +274,40 @@ std::optional<pc_sample_record_t> rocprofiler_compute_tool::decode_pc_sample_rec
     return std::nullopt;
 }
 
+std::optional<kernel_dispatch_record_t> rocprofiler_compute_tool::decode_kernel_dispatch_record(
+    const rocprofiler_record_header_t& header)
+{
+    if (header.category != ROCPROFILER_BUFFER_CATEGORY_TRACING ||
+        header.kind != ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH)
+        return std::nullopt;
+
+    const auto& rec = *reinterpret_cast<const rocprofiler_buffer_tracing_kernel_dispatch_record_t*>(
+        header.payload);
+    const auto& di = rec.dispatch_info;
+
+    kernel_dispatch_record_t out{};
+    out.size            = rec.size;
+    out.kind            = rec.kind;
+    out.operation       = rec.operation;
+    out.thread_id       = rec.thread_id;
+    out.corr_internal   = rec.correlation_id.internal;
+    out.corr_external   = rec.correlation_id.external.value;
+    out.start_timestamp = rec.start_timestamp;
+    out.end_timestamp   = rec.end_timestamp;
+
+    out.dispatch_info_size   = di.size;
+    out.agent_id_handle      = di.agent_id.handle;
+    out.queue_id_handle      = di.queue_id.handle;
+    out.kernel_id            = di.kernel_id;
+    out.dispatch_id          = di.dispatch_id;
+    out.private_segment_size = di.private_segment_size;
+    out.group_segment_size   = di.group_segment_size;
+    out.workgroup_size       = map_dim3(di.workgroup_size);
+    out.grid_size            = map_dim3(di.grid_size);
+
+    return out;
+}
+
 void pc_sample_writer_json_t::begin()
 {
     m_pid = 0;
@@ -281,6 +316,8 @@ void pc_sample_writer_json_t::begin()
     m_instructions.clear();
     m_comments.clear();
     m_kernel_symbols.clear();
+    m_agents.clear();
+    m_kernel_dispatches.clear();
 }
 
 void pc_sample_writer_json_t::append_stochastic(const pc_sample_record_t& r, size_t inst_index)
@@ -306,6 +343,16 @@ void pc_sample_writer_json_t::set_strings(const pc_string_interner_t& interner)
 void pc_sample_writer_json_t::set_kernel_symbols(const std::vector<kernel_symbol_entry_t>& syms)
 {
     m_kernel_symbols = syms;
+}
+
+void pc_sample_writer_json_t::set_agents(const std::vector<agent_record_t>& agents)
+{
+    m_agents = agents;
+}
+
+void pc_sample_writer_json_t::set_kernel_dispatches(const std::vector<kernel_dispatch_record_t>& dispatches)
+{
+    m_kernel_dispatches = dispatches;
 }
 
 void pc_sample_writer_json_t::set_metadata(int pid)
@@ -339,12 +386,59 @@ std::string pc_sample_writer_json_t::get_result()
         kernel_symbols.push_back(nlohmann::json::object({
             {"code_object_id", s.code_object_id},
             {"formatted_kernel_name", s.formatted_kernel_name},
+            {"kernel_id", s.kernel_id},
+        }));
+    }
+
+    auto agents = nlohmann::json::array();
+    for (const auto& a : m_agents)
+    {
+        agents.push_back(nlohmann::json::object({
+            {"size", a.size},
+            {"id", nlohmann::json::object({{"handle", a.id_handle}})},
+            {"type", a.type},
+            {"node_id", a.node_id},
+            {"logical_node_id", a.logical_node_id},
+            {"cu_count", a.cu_count},
+            {"gpu_id", a.gpu_id},
+            {"wave_front_size", a.wave_front_size},
+            {"simd_count", a.simd_count},
+        }));
+    }
+
+    auto kernel_dispatch = nlohmann::json::array();
+    for (const auto& d : m_kernel_dispatches)
+    {
+        kernel_dispatch.push_back(nlohmann::json::object({
+            {"size", d.size},
+            {"kind", d.kind},
+            {"operation", d.operation},
+            {"thread_id", d.thread_id},
+            {"correlation_id",
+             nlohmann::json::object({
+                 {"internal", d.corr_internal},
+                 {"external", d.corr_external},
+             })},
+            {"start_timestamp", d.start_timestamp},
+            {"end_timestamp", d.end_timestamp},
+            {"dispatch_info",
+             nlohmann::json::object({
+                 {"size", d.dispatch_info_size},
+                 {"agent_id", nlohmann::json::object({{"handle", d.agent_id_handle}})},
+                 {"queue_id", nlohmann::json::object({{"handle", d.queue_id_handle}})},
+                 {"kernel_id", d.kernel_id},
+                 {"dispatch_id", d.dispatch_id},
+                 {"private_segment_size", d.private_segment_size},
+                 {"group_segment_size", d.group_segment_size},
+                 {"workgroup_size", dim3_to_json(d.workgroup_size)},
+                 {"grid_size", dim3_to_json(d.grid_size)},
+             })},
         }));
     }
 
     auto entry = nlohmann::json::object({
         {"metadata", nlohmann::json::object({{"pid", m_pid}})},
-        {"agents", nlohmann::json::array()},
+        {"agents", std::move(agents)},
         {"counters", nlohmann::json::array()},
         {"summary", nlohmann::json::array()},
         {"host_functions", nlohmann::json::array()},
@@ -362,7 +456,7 @@ std::string pc_sample_writer_json_t::get_result()
          nlohmann::json::object({
              {"pc_sample_stochastic", std::move(stochastic_records)},
              {"pc_sample_host_trap", std::move(host_trap_records)},
-             {"kernel_dispatch", nlohmann::json::array()},
+             {"kernel_dispatch", std::move(kernel_dispatch)},
              {"hip_api", nlohmann::json::array()},
              {"hsa_api", nlohmann::json::array()},
              {"memory_copy", nlohmann::json::array()},

@@ -31,7 +31,11 @@ public:
     void on_code_object_load(const rocprofiler_callback_tracing_code_object_load_data_t& info);
 
     void append_sample(const pc_sample_record_t& record);
-    void add_kernel_symbol(uint64_t code_object_id, const std::string& formatted_kernel_name);
+    void add_kernel_symbol(uint64_t           code_object_id,
+                           const std::string& formatted_kernel_name,
+                           uint64_t           kernel_id);
+    void add_agent(const agent_record_t& agent);
+    void append_kernel_dispatch(const kernel_dispatch_record_t& record);
 
     void finalize();
 

@@ -207,13 +207,15 @@ TEST_F(TestSdkCallbacks, FeatureDelegatesSampleIngestionAndFinalizeToCollector)
 
     pc_sample_record_t sample{};
     feature.append_sample(sample);
-    feature.add_kernel_symbol(42, "kernel_name");
+    feature.add_kernel_symbol(42, "kernel_name", 7);
     feature.finalize();
 
     EXPECT_EQ(collector->append_sample_count, 1);
     ASSERT_EQ(collector->added_kernel_symbols.size(), 1u);
     EXPECT_EQ(collector->added_kernel_symbols[0].first, 42u);
     EXPECT_EQ(collector->added_kernel_symbols[0].second, "kernel_name");
+    ASSERT_EQ(collector->added_kernel_ids.size(), 1u);
+    EXPECT_EQ(collector->added_kernel_ids[0], 7u);
     EXPECT_EQ(collector->write_samples_count, 1);
     EXPECT_EQ(collector->snapshot_sources_count, 1);
 

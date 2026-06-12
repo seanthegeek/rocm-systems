@@ -92,10 +92,23 @@ void pc_sampling_collector_impl_t::append_sample(const pc_sample_record_t& recor
 }
 
 void pc_sampling_collector_impl_t::add_kernel_symbol(uint64_t           code_object_id,
-                                                     const std::string& formatted_kernel_name)
+                                                     const std::string& formatted_kernel_name,
+                                                     uint64_t           kernel_id)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    m_kernel_symbols.push_back(kernel_symbol_entry_t{code_object_id, formatted_kernel_name});
+    m_kernel_symbols.push_back(kernel_symbol_entry_t{code_object_id, formatted_kernel_name, kernel_id});
+}
+
+void pc_sampling_collector_impl_t::add_agent(const agent_record_t& agent)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_agents.push_back(agent);
+}
+
+void pc_sampling_collector_impl_t::append_kernel_dispatch(const kernel_dispatch_record_t& record)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_kernel_dispatches.push_back(record);
 }
 
 instruction_t pc_sampling_collector_impl_t::resolve_instruction(uint64_t code_object_id,
@@ -152,6 +165,8 @@ void pc_sampling_collector_impl_t::write_samples(pc_sample_writer_t& writer)
 
     writer.set_strings(m_interner);
     writer.set_kernel_symbols(m_kernel_symbols);
+    writer.set_agents(m_agents);
+    writer.set_kernel_dispatches(m_kernel_dispatches);
     writer.set_metadata(static_cast<int>(getpid()));
 }
 

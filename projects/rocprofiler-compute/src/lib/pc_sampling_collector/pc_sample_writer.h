@@ -99,6 +99,48 @@ struct kernel_symbol_entry_t
 {
     uint64_t    code_object_id = 0;
     std::string formatted_kernel_name{};
+    uint64_t    kernel_id = 0;
+};
+
+// Minimal agent record persisted for the results JSON. Mirrors the SDK
+// agents[] entry closely enough for the consumer's GPU-id map (GPU-type agents
+// sorted by node_id -> 0-indexed GPU id) plus a few cheap descriptive fields.
+struct agent_record_t
+{
+    uint64_t size            = 0;  // sizeof the SDK agent struct (for SDK-shape parity)
+    uint64_t id_handle       = 0;
+    uint32_t type            = 0;  // raw rocprofiler_agent_type_t value
+    uint32_t node_id         = 0;
+    int32_t  logical_node_id = 0;
+    uint32_t cu_count        = 0;
+    uint64_t gpu_id          = 0;  // KFD identifier (GPU only)
+    uint32_t wave_front_size = 0;
+    uint32_t simd_count      = 0;
+};
+
+// Persistent kernel-dispatch record captured from the SDK's buffered
+// kernel-dispatch tracing service. Carries the start/end timestamps and
+// dispatch_info that the consumer needs to attribute PC samples to kernels.
+struct kernel_dispatch_record_t
+{
+    uint64_t size            = 0;
+    uint32_t kind            = 0;  // raw rocprofiler_buffer_tracing_kind_t value
+    uint32_t operation       = 0;
+    uint64_t thread_id       = 0;
+    uint64_t corr_internal   = 0;
+    uint64_t corr_external   = 0;
+    uint64_t start_timestamp = 0;
+    uint64_t end_timestamp   = 0;
+
+    uint64_t         dispatch_info_size   = 0;
+    uint64_t         agent_id_handle      = 0;
+    uint64_t         queue_id_handle      = 0;
+    uint64_t         kernel_id            = 0;
+    uint64_t         dispatch_id          = 0;
+    uint32_t         private_segment_size = 0;
+    uint32_t         group_segment_size   = 0;
+    pc_sample_dim3_t workgroup_size{};
+    pc_sample_dim3_t grid_size{};
 };
 
 class pc_string_interner_t
@@ -132,39 +174,49 @@ private:
 // or header.kind is not one of the two supported PC sampling record kinds.
 std::optional<pc_sample_record_t> decode_pc_sample_record(const rocprofiler_record_header_t& header);
 
+// Returns std::nullopt when header.category != ROCPROFILER_BUFFER_CATEGORY_TRACING
+// or header.kind != ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH.
+std::optional<kernel_dispatch_record_t> decode_kernel_dispatch_record(const rocprofiler_record_header_t& header);
+
 class pc_sample_writer_t
 {
 public:
     virtual ~pc_sample_writer_t() = default;
     virtual void begin()          = 0;
     // inst_index is the interned (instruction, comment) index for this sample.
-    virtual void        append_stochastic(const pc_sample_record_t& r, size_t inst_index)  = 0;
-    virtual void        append_host_trap(const pc_sample_record_t& r, size_t inst_index)   = 0;
-    virtual void        set_strings(const pc_string_interner_t& interner)                  = 0;
-    virtual void        set_kernel_symbols(const std::vector<kernel_symbol_entry_t>& syms) = 0;
-    virtual void        set_metadata(int pid)                                              = 0;
-    virtual std::string get_result()                                                       = 0;
-    virtual void        flush(const std::filesystem::path& output_file_path)               = 0;
+    virtual void append_stochastic(const pc_sample_record_t& r, size_t inst_index)              = 0;
+    virtual void append_host_trap(const pc_sample_record_t& r, size_t inst_index)               = 0;
+    virtual void set_strings(const pc_string_interner_t& interner)                              = 0;
+    virtual void set_kernel_symbols(const std::vector<kernel_symbol_entry_t>& syms)             = 0;
+    virtual void set_agents(const std::vector<agent_record_t>& agents)                          = 0;
+    virtual void set_kernel_dispatches(const std::vector<kernel_dispatch_record_t>& dispatches) = 0;
+    virtual void set_metadata(int pid)                                                          = 0;
+    virtual std::string get_result()                                                            = 0;
+    virtual void        flush(const std::filesystem::path& output_file_path)                    = 0;
 };
 
 class pc_sample_writer_json_t : public pc_sample_writer_t
 {
 public:
-    void        begin() override;
-    void        append_stochastic(const pc_sample_record_t& r, size_t inst_index) override;
-    void        append_host_trap(const pc_sample_record_t& r, size_t inst_index) override;
-    void        set_strings(const pc_string_interner_t& interner) override;
-    void        set_kernel_symbols(const std::vector<kernel_symbol_entry_t>& syms) override;
-    void        set_metadata(int pid) override;
+    void begin() override;
+    void append_stochastic(const pc_sample_record_t& r, size_t inst_index) override;
+    void append_host_trap(const pc_sample_record_t& r, size_t inst_index) override;
+    void set_strings(const pc_string_interner_t& interner) override;
+    void set_kernel_symbols(const std::vector<kernel_symbol_entry_t>& syms) override;
+    void set_agents(const std::vector<agent_record_t>& agents) override;
+    void set_kernel_dispatches(const std::vector<kernel_dispatch_record_t>& dispatches) override;
+    void set_metadata(int pid) override;
     std::string get_result() override;
     void        flush(const std::filesystem::path& output_file_path) override;
 
 private:
-    int                                m_pid = 0;
-    std::vector<pc_sample_record_t>    m_stochastic;
-    std::vector<pc_sample_record_t>    m_host_trap;
-    std::vector<std::string>           m_instructions;
-    std::vector<std::string>           m_comments;
-    std::vector<kernel_symbol_entry_t> m_kernel_symbols;
+    int                                   m_pid = 0;
+    std::vector<pc_sample_record_t>       m_stochastic;
+    std::vector<pc_sample_record_t>       m_host_trap;
+    std::vector<std::string>              m_instructions;
+    std::vector<std::string>              m_comments;
+    std::vector<kernel_symbol_entry_t>    m_kernel_symbols;
+    std::vector<agent_record_t>           m_agents;
+    std::vector<kernel_dispatch_record_t> m_kernel_dispatches;
 };
 }  // namespace rocprofiler_compute_tool

@@ -52,9 +52,20 @@ void pc_sampling_feature_t::append_sample(const pc_sample_record_t& record)
 }
 
 void pc_sampling_feature_t::add_kernel_symbol(uint64_t           code_object_id,
-                                              const std::string& formatted_kernel_name)
+                                              const std::string& formatted_kernel_name,
+                                              uint64_t           kernel_id)
 {
-    m_collector->add_kernel_symbol(code_object_id, formatted_kernel_name);
+    m_collector->add_kernel_symbol(code_object_id, formatted_kernel_name, kernel_id);
+}
+
+void pc_sampling_feature_t::add_agent(const agent_record_t& agent)
+{
+    m_collector->add_agent(agent);
+}
+
+void pc_sampling_feature_t::append_kernel_dispatch(const kernel_dispatch_record_t& record)
+{
+    m_collector->append_kernel_dispatch(record);
 }
 
 void pc_sampling_feature_t::finalize()

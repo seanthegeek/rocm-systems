@@ -133,6 +133,17 @@ public:
                                                        rocprofiler_buffer_id_t          buffer_id,
                                                        int flags) override;
     void                 flush_buffer(rocprofiler_buffer_id_t buffer_id) override;
+    void configure_buffer_tracing_service(rocprofiler_context_id_t          context_id,
+                                          rocprofiler_buffer_tracing_kind_t kind,
+                                          rocprofiler_buffer_id_t           buffer_id) override;
+    void query_agent_records(std::vector<rocprofiler_compute_tool::agent_record_t>& out_agents) override;
+
+    struct buffer_tracing_service_info
+    {
+        uint64_t                          context   = 0;
+        rocprofiler_buffer_tracing_kind_t kind      = ROCPROFILER_BUFFER_TRACING_NONE;
+        uint64_t                          buffer_id = 0;
+    };
 
     struct hsa_intercept_registration_info
     {
@@ -180,6 +191,8 @@ public:
     const std::vector<hsa_intercept_registration_info>& get_hsa_intercept_registration_info() const;
 
     void set_available_gpu_agents(std::vector<rocprofiler_agent_id_t> agents);
+    void set_agent_records(std::vector<rocprofiler_compute_tool::agent_record_t> agents);
+    const std::vector<buffer_tracing_service_info>& get_buffer_tracing_service_info() const;
     void set_pc_sampling_config(size_t                           min_interval,
                                 size_t                           max_interval,
                                 rocprofiler_pc_sampling_method_t method,
@@ -201,12 +214,14 @@ private:
     std::vector<std::string>                     m_counter_names;
     std::vector<hsa_intercept_registration_info> m_hsa_intercept_registration_info;
 
-    std::vector<rocprofiler_agent_id_t> m_gpu_agents;
-    pc_sampling_config_t                m_pc_sampling_config{};
-    bool                                m_pc_sampling_config_set       = false;
-    rocprofiler_status_t                m_configure_pc_sampling_status = ROCPROFILER_STATUS_SUCCESS;
-    uint64_t                            m_next_buffer_id               = 1;
-    std::vector<create_buffer_info>     m_create_buffer_info;
+    std::vector<rocprofiler_agent_id_t>                   m_gpu_agents;
+    std::vector<rocprofiler_compute_tool::agent_record_t> m_agent_records;
+    std::vector<buffer_tracing_service_info>              m_buffer_tracing_service_info;
+    pc_sampling_config_t                                  m_pc_sampling_config{};
+    bool                                                  m_pc_sampling_config_set = false;
+    rocprofiler_status_t            m_configure_pc_sampling_status = ROCPROFILER_STATUS_SUCCESS;
+    uint64_t                        m_next_buffer_id               = 1;
+    std::vector<create_buffer_info> m_create_buffer_info;
     std::vector<configure_pc_sampling_info> m_configure_pc_sampling_info;
     std::vector<flush_buffer_info>          m_flush_buffer_info;
 };
@@ -234,14 +249,23 @@ public:
     void write(rocprofiler_compute_tool::code_object_writer_t& writer) override;
 
     void append_sample(const rocprofiler_compute_tool::pc_sample_record_t& record) override;
-    void add_kernel_symbol(uint64_t code_object_id, const std::string& formatted_kernel_name) override;
+    void add_kernel_symbol(uint64_t           code_object_id,
+                           const std::string& formatted_kernel_name,
+                           uint64_t           kernel_id) override;
+    void add_agent(const rocprofiler_compute_tool::agent_record_t& agent) override;
+    void append_kernel_dispatch(const rocprofiler_compute_tool::kernel_dispatch_record_t& record) override;
     void   write_samples(rocprofiler_compute_tool::pc_sample_writer_t& writer) override;
     size_t snapshot_sources(const std::filesystem::path& output_root) override;
 
-    int                                                       load_count             = 0;
-    int                                                       append_sample_count    = 0;
-    int                                                       write_samples_count    = 0;
-    int                                                       snapshot_sources_count = 0;
+    int                                                       load_count                   = 0;
+    int                                                       append_sample_count          = 0;
+    int                                                       write_samples_count          = 0;
+    int                                                       snapshot_sources_count       = 0;
+    int                                                       add_agent_count              = 0;
+    int                                                       append_kernel_dispatch_count = 0;
     std::vector<rocprofiler_compute_tool::pc_sample_record_t> appended_samples;
     std::vector<std::pair<uint64_t, std::string>>             added_kernel_symbols;
+    std::vector<uint64_t>                                     added_kernel_ids;
+    std::vector<rocprofiler_compute_tool::agent_record_t>     added_agents;
+    std::vector<rocprofiler_compute_tool::kernel_dispatch_record_t> appended_kernel_dispatches;
 };
