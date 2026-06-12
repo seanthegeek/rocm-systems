@@ -7,7 +7,8 @@
 
 using namespace rocprofiler_compute_tool;
 
-std::optional<std::string> rocprofiler_compute_tool::parse_source_ref(const std::string& comment)
+std::optional<std::string> rocprofiler_compute_tool::source_snapshot_impl_t::parse_ref(
+    const std::string& comment) const
 {
     if (comment.empty())
     {
@@ -23,9 +24,10 @@ std::optional<std::string> rocprofiler_compute_tool::parse_source_ref(const std:
     return comment.substr(0, pos);
 }
 
-size_t rocprofiler_compute_tool::snapshot_source_files(const std::vector<std::string>& source_refs,
-                                                       const std::filesystem::path&    output_root,
-                                                       const std::filesystem::path&    allowed_root)
+size_t rocprofiler_compute_tool::source_snapshot_impl_t::snapshot(
+    const std::vector<std::string>& source_refs,
+    const std::filesystem::path&    output_root,
+    const std::filesystem::path&    allowed_root) const
 {
     const std::filesystem::path sources_root = output_root / "code_obj_sources";
 

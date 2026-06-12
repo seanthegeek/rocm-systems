@@ -48,6 +48,8 @@ protected:
         return std::string(std::istreambuf_iterator<char>(ifs), std::istreambuf_iterator<char>());
     }
 
+    rocprofiler_compute_tool::source_snapshot_impl_t m_snapshotter;
+
     std::filesystem::path m_tmp_root;
     std::filesystem::path m_output_root;
     std::filesystem::path m_file_a;

@@ -1,6 +1,6 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
-#include "json_file_io.h"
+#include "file_io.h"
 
 #include "gsl_assert.h"
 
@@ -9,7 +9,7 @@
 
 namespace rocprofiler_compute_tool
 {
-void write_json_to_file(const std::filesystem::path& output_file_path, const std::string& contents)
+void file_io_json_t::write(const std::filesystem::path& output_file_path, const std::string& contents)
 {
     Expects(!output_file_path.empty());
     Expects(output_file_path.has_parent_path());

@@ -2,8 +2,8 @@
 // SPDX-License-Identifier:  MIT
 #include "code_object_writer.h"
 
+#include "file_io.h"
 #include "gsl_assert.h"
-#include "json_file_io.h"
 
 #include <iostream>
 
@@ -76,7 +76,7 @@ std::string code_object_writer_json_t::get_result()
 
 void code_object_writer_json_t::flush(const std::filesystem::path& output_file_path)
 {
-    write_json_to_file(output_file_path, get_result());
+    file_io_json_t{}.write(output_file_path, get_result());
     std::clog << "[rocprofiler-compute] [" << __FUNCTION__
               << "] Code object data has been written to: " << output_file_path << "\n";
 }

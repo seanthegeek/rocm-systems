@@ -33,33 +33,32 @@ bool copied_somewhere_with_tail(const std::filesystem::path& code_obj_sources,
 }
 }  // namespace
 
-// ---- parse_source_ref ----
+// ---- parse_ref ----
 
 TEST_F(test_source_snapshot_t, ParseSourceRef_PathBeforeLastColon)
 {
-    EXPECT_EQ(rocprofiler_compute_tool::parse_source_ref("foo/bar.cpp:42"),
-              std::optional<std::string>{"foo/bar.cpp"});
-    EXPECT_EQ(rocprofiler_compute_tool::parse_source_ref("a:b:10"), std::optional<std::string>{"a:b"});
+    EXPECT_EQ(m_snapshotter.parse_ref("foo/bar.cpp:42"), std::optional<std::string>{"foo/bar.cpp"});
+    EXPECT_EQ(m_snapshotter.parse_ref("a:b:10"), std::optional<std::string>{"a:b"});
 }
 
 TEST_F(test_source_snapshot_t, ParseSourceRef_NoColon_ReturnsNullopt)
 {
-    EXPECT_EQ(rocprofiler_compute_tool::parse_source_ref("no colon here"), std::nullopt);
+    EXPECT_EQ(m_snapshotter.parse_ref("no colon here"), std::nullopt);
 }
 
 TEST_F(test_source_snapshot_t, ParseSourceRef_LeadingColonOrEmpty_ReturnsNullopt)
 {
-    EXPECT_EQ(rocprofiler_compute_tool::parse_source_ref(":30"), std::nullopt);
-    EXPECT_EQ(rocprofiler_compute_tool::parse_source_ref(""), std::nullopt);
+    EXPECT_EQ(m_snapshotter.parse_ref(":30"), std::nullopt);
+    EXPECT_EQ(m_snapshotter.parse_ref(""), std::nullopt);
 }
 
-// ---- snapshot_source_files ----
+// ---- snapshot ----
 
 TEST_F(test_source_snapshot_t, SnapshotSourceFiles_CopiesExistingFilesPreservingTail)
 {
     const std::vector<std::string> refs{m_file_a.string(), m_file_b.string()};
 
-    const size_t copied = rocprofiler_compute_tool::snapshot_source_files(refs, m_output_root, m_tmp_root);
+    const size_t copied = m_snapshotter.snapshot(refs, m_output_root, m_tmp_root);
 
     const auto code_obj_sources = m_output_root / "code_obj_sources";
     EXPECT_EQ(copied, 2u);
@@ -73,8 +72,7 @@ TEST_F(test_source_snapshot_t, SnapshotSourceFiles_SkipsMissingRefs)
     const std::vector<std::string> refs{m_file_a.string(), missing, m_file_b.string()};
 
     size_t copied = 0;
-    EXPECT_NO_THROW(
-        copied = rocprofiler_compute_tool::snapshot_source_files(refs, m_output_root, m_tmp_root));
+    EXPECT_NO_THROW(copied = m_snapshotter.snapshot(refs, m_output_root, m_tmp_root));
 
     const auto code_obj_sources = m_output_root / "code_obj_sources";
     EXPECT_EQ(copied, 2u);
@@ -86,7 +84,7 @@ TEST_F(test_source_snapshot_t, SnapshotSourceFiles_DedupsDuplicateRefs)
 {
     const std::vector<std::string> refs{m_file_a.string(), m_file_a.string()};
 
-    const size_t copied = rocprofiler_compute_tool::snapshot_source_files(refs, m_output_root, m_tmp_root);
+    const size_t copied = m_snapshotter.snapshot(refs, m_output_root, m_tmp_root);
 
     const auto code_obj_sources = m_output_root / "code_obj_sources";
     EXPECT_EQ(copied, 1u);
@@ -106,9 +104,7 @@ TEST_F(test_source_snapshot_t, SnapshotSourceFiles_RefEscapingAllowedRootViaDotD
     const auto traversal    = (allowed_root / ".." / "victim.txt").string();
 
     size_t copied = 0;
-    EXPECT_NO_THROW(copied = rocprofiler_compute_tool::snapshot_source_files({traversal},
-                                                                             m_output_root,
-                                                                             allowed_root));
+    EXPECT_NO_THROW(copied = m_snapshotter.snapshot({traversal}, m_output_root, allowed_root));
 
     EXPECT_EQ(copied, 0u);
     EXPECT_EQ(read_file(outside), "original\n");  // unchanged: not read/copied
@@ -125,9 +121,7 @@ TEST_F(test_source_snapshot_t, SnapshotSourceFiles_RefOutsideAllowedRoot_IsRejec
     const auto allowed_root = m_tmp_root / "proj";
 
     size_t copied = 0;
-    EXPECT_NO_THROW(copied = rocprofiler_compute_tool::snapshot_source_files({outside.string()},
-                                                                             m_output_root,
-                                                                             allowed_root));
+    EXPECT_NO_THROW(copied = m_snapshotter.snapshot({outside.string()}, m_output_root, allowed_root));
 
     EXPECT_EQ(copied, 0u);
     // The out-of-root file is not copied anywhere under code_obj_sources.
@@ -139,9 +133,7 @@ TEST_F(test_source_snapshot_t, SnapshotSourceFiles_RefInsideAllowedRoot_IsCopied
     // Sanity: a file inside the allowed root IS copied (m_file_a lives under proj/).
     const auto allowed_root = m_tmp_root / "proj";
 
-    const size_t copied = rocprofiler_compute_tool::snapshot_source_files({m_file_a.string()},
-                                                                          m_output_root,
-                                                                          allowed_root);
+    const size_t copied = m_snapshotter.snapshot({m_file_a.string()}, m_output_root, allowed_root);
 
     EXPECT_EQ(copied, 1u);
     EXPECT_TRUE(copied_somewhere_with_tail(m_output_root / "code_obj_sources", m_file_a, m_contents_a));

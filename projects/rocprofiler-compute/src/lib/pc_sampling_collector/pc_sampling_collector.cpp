@@ -172,16 +172,18 @@ void pc_sampling_collector_impl_t::write_samples(pc_sample_writer_t& writer)
 
 size_t pc_sampling_collector_impl_t::snapshot_sources(const std::filesystem::path& output_root)
 {
+    const source_snapshot_impl_t snapshotter;
+
     std::vector<std::string> refs;
     for_each_instruction(
-        [&refs](uint64_t /*id*/, const symbol_t& /*sym*/, const instruction_t& inst)
+        [&refs, &snapshotter](uint64_t /*id*/, const symbol_t& /*sym*/, const instruction_t& inst)
         {
-            if (const auto ref = parse_source_ref(inst.comment))
+            if (const auto ref = snapshotter.parse_ref(inst.comment))
             {
                 refs.push_back(*ref);
             }
         });
 
-    // snapshot_source_files dedups internally, so no need to pre-unique here.
-    return snapshot_source_files(refs, output_root);
+    // snapshot dedups internally, so no need to pre-unique here.
+    return snapshotter.snapshot(refs, output_root);
 }

@@ -6,8 +6,8 @@
 
 #include "pc_sample_writer.h"
 
+#include "file_io.h"
 #include "gsl_assert.h"
-#include "json_file_io.h"
 #include "nlohmann/json.hpp"
 
 #include <rocprofiler-sdk/buffer_tracing.h>
@@ -140,7 +140,7 @@ nlohmann::json snapshot_to_json(const pc_sample_snapshot_t& s)
     });
 }
 
-// Fields shared by both record kinds; host-trap samples emit exactly these.
+// Host-trap samples emit exactly these fields; stochastic adds more on top.
 nlohmann::json common_record_to_json(const pc_sample_record_t& r)
 {
     return nlohmann::json::object({
@@ -479,9 +479,9 @@ std::string pc_sample_writer_json_t::get_result()
 
 void pc_sample_writer_json_t::flush(const std::filesystem::path& output_file_path)
 {
-    // write_json_to_file throws on any I/O failure; generate_output()'s
+    // file_io_json_t::write throws on any I/O failure; generate_output()'s
     // finalize() wrapper catches it so a failed write never aborts shutdown.
-    write_json_to_file(output_file_path, get_result());
+    file_io_json_t{}.write(output_file_path, get_result());
     std::clog << "[rocprofiler-compute] [" << __FUNCTION__
               << "] PC sampling data has been written to: " << output_file_path << "\n";
 }
