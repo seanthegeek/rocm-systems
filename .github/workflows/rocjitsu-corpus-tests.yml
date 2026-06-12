@@ -71,6 +71,10 @@ jobs:
           test -x "${LLVM_BIN}/amdclang"
           test -x "${LLVM_BIN}/amdclang++"
 
+          if [ ! -e "${ROCM_BIN}/amdllvm" ]; then
+            ln -s "${LLVM_BIN}/amdllvm" "${ROCM_BIN}/amdllvm"
+          fi
+
           {
             echo "ROCM_PATH=${ROCM_ROOT}"
             echo "CC=${LLVM_BIN}/amdclang"
