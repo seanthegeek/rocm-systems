@@ -56,11 +56,12 @@ inline hipError_t VMMAllocCommon(void** ptr, size_t size, hipMemAllocationHandle
   hipMemGenericAllocationHandle_t handle;
   hipMemAllocationProp prop = {};
 
-#if HIP_VERSION < 7020000
+// #if HIP_VERSION < 7020000
+//   prop.type = hipMemAllocationTypePinned;
+// #else
+//   prop.type = hipMemAllocationTypeUncached;
+// #endif
   prop.type = hipMemAllocationTypePinned;
-#else
-  prop.type = hipMemAllocationTypeUncached;
-#endif
   prop.location.type = hipMemLocationTypeDevice;
 
   // Get current device ID
